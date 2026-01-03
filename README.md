@@ -1,2 +1,41 @@
-# Benq-Core
-Ecosistema modular de investigación cuantitativa para análisis de activos. Incluye un pipeline ETL robusto (DuckDB, Polars) con auditoría de calidad, ingeniería de factores y modelización avanzada (Inferencia Causal/TCN). Diseñado para el ciclo completo: desde ingesta hasta backtesting y ejecución estratégica. 
+# 🏛️ Ben Quant Core
+
+![Status](https://img.shields.io/badge/Status-Active_Development-green)
+![Architecture](https://img.shields.io/badge/Architecture-Modular_Monolith-blue)
+
+> **Ben Quant Core** es un programa de análisis de activos integral que esta siendo desarrollado de manera activa.
+
+## 📂 Module Structure
+
+* **`src/data_downloader/`**: Bloque de descarga de datos tipo: ETL pipeline utilizando la libreria `yfinance` con backoff exponencial, OLAP storage (DuckDB) y medidas de seguridad.
+* **`src/engine/`**:Cálculo de variables, indicadores y modelización.
+* **`src/backtesting/`**: 
+* **`src/strategies/`**: Aplicación de los cálculos.
+## 🏗️ Arquitectura & ruta de trabajo:
+
+Este proyecto se encuentra en **Fase 1 (Data Core)**. De la siguiente hoja de ruta:
+
+- [x] **Fase 1: Infraestructura de Datos** (Actual)
+  - Pipeline ETL tolerante a fallos utilizando `yfinance` con retroceso exponencial (*exponential backoff*).
+  - Control de calidad de datos (detección de *splits*, rellenado de huecos...) mediante `safety.py`.
+  - Capa de almacenamiento OLAP basada en **DuckDB** y **Parquet**.
+
+- [ ] **Fase 2: Ingeniería de Factores** (Próximamente - T1 2026)
+  - Motor de indicadores técnicos optimizado con **Polars** y otros.
+  - Análisis de microestructura (superficies de volatilidad, *proxies* de liquidez).
+  - Otros datos derivados de la modelización.
+
+- [ ] **Fase 3: Motor de Simulación** (T1 2026)
+  - Backtester vectorial basado en eventos (*Event-Driven*).
+  - Gestión de cartera y métricas de riesgo (Sharpe, Sortino, MaxDD).
+
+- [ ] **Fase 4: Estrategia Alpha** (T2 2026)
+  - Integración de los datos recabados en los anteriores bloques para producción.
+
+---
+
+## 🚀 Inicio Rápido (Módulo de Datos)
+
+### Requisitos previos
+```bash
+pip install -r requirements.txt
