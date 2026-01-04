@@ -7,7 +7,7 @@
 
 ## 📂 Arquitectura del programa:
 
-* **`src/data_downloader/`**: Bloque de descarga de datos tipo: ETL pipeline utilizando la libreria `yfinance` con backoff exponencial, OLAP storage (DuckDB) y medidas de seguridad.
+* **`src/src_DD`**: Bloque de descarga de datos tipo: ETL pipeline utilizando la libreria `yfinance` con backoff exponencial, OLAP storage (DuckDB) y medidas de seguridad.
 * **`src/engine/`**:Cálculo de variables, indicadores y modelización.
 * **`src/backtesting/`**: 
 * **`src/strategies/`**: Aplicación de los cálculos.
