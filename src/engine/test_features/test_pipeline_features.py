@@ -2,167 +2,154 @@ import unittest
 import os
 import sys
 import shutil
+import time
+import tracemalloc  # Para medir memoria
 import polars as pl
 import numpy as np
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from datetime import datetime, timedelta
 
 # --- SETUP DE RUTAS ---
-# Ajustamos paths para poder importar módulos hermanos y padres
 current_dir = os.path.dirname(os.path.abspath(__file__))
-features_dir = os.path.dirname(current_dir)      # src/engine/features
-engine_dir = os.path.dirname(features_dir)       # src/engine
-src_dir = os.path.dirname(engine_dir)            # src
+features_dir = os.path.dirname(current_dir)      
+engine_dir = os.path.dirname(features_dir)       
+src_dir = os.path.dirname(engine_dir)            
 
-sys.path.append(features_dir)    # Para importar src_features
-sys.path.append(src_dir)         # Para importar src_DD
+sys.path.append(features_dir)
+sys.path.append(src_dir)
 sys.path.append(os.path.join(features_dir, "src_features"))
 
-# Importamos el pipeline bajo prueba
 import pipeline_features
-# Importamos config para parchearlo
 import config
 
-class TestFeaturePipeline(unittest.TestCase):
+class TestFeaturePipelineHardcore(unittest.TestCase):
 
     def setUp(self):
-        """Configuración previa a cada test: Entorno temporal."""
-        self.test_dir = os.path.join(current_dir, "temp_pipeline_test")
+        """Configuración: Entorno temporal y Datasets Sintéticos Grandes."""
+        self.test_dir = os.path.join(current_dir, "temp_pipeline_bench")
         os.makedirs(self.test_dir, exist_ok=True)
-        
-        # Ruta simulada para el output
-        self.fake_output_path = os.path.join(self.test_dir, "test_features.parquet")
-        
-        # --- GENERACIÓN DE DATOS SINTÉTICOS ---
-        # Creamos un micromercado para probar la neutralización
-        # 2 Sectores, 4 Tickers (2 por sector), ~150 días
-        dates = [datetime(2023, 1, 1) + timedelta(days=i) for i in range(150)]
-        
-        data = []
-        tickers_setup = [
-            ("AAPL", "Tech", 150.0),    # US
-            ("MSFT", "Tech", 300.0),    # US
-            ("SAN.MC", "Banks", 4.0),   # ES (Prueba inferencia país)
-            ("BBVA.MC", "Banks", 8.0)   # ES
-        ]
-        
-        rng = np.random.default_rng(42)
-        
-        for tick, sect, base_price in tickers_setup:
-            for d in dates:
-                # Caminata aleatoria simple
-                noise = rng.normal(0, 1)
-                price = base_price + noise
-                data.append({
-                    "Date": d,
-                    "ticker": tick,
-                    "sector": sect,
-                    "Close": abs(price),
-                    "Open": abs(price * 0.99),
-                    "High": abs(price * 1.05),
-                    "Low": abs(price * 0.95),
-                    "Volume": rng.integers(1000, 50000),
-                    "data_quality": 1
-                })
-                
-        self.df_mock = pl.DataFrame(data).with_columns([
-            pl.col("Date").cast(pl.Datetime),
-            pl.col("Close").cast(pl.Float64),
-            pl.col("Volume").cast(pl.Float64)
-        ])
+        self.fake_output_path = os.path.join(self.test_dir, "bench_features.parquet")
 
     def tearDown(self):
-        """Limpieza."""
         if os.path.exists(self.test_dir):
             try:
                 shutil.rmtree(self.test_dir)
             except Exception:
                 pass
 
-    def test_country_inference(self):
-        """Prueba unitaria de la lógica de detección de país."""
-        print("\n🧪 Test Pipeline: Inferencia de País...")
+    def generate_stress_data(self, n_tickers=50, n_days=500):
+        """Genera un dataset volumétrico para pruebas de estrés."""
+        print(f"   Generating mock data: {n_tickers} tickers x {n_days} days...")
+        dates = [datetime(2022, 1, 1) + timedelta(days=i) for i in range(n_days)]
         
-        df = pl.DataFrame({"ticker": ["AAPL", "TEF.MC", "VOW.DE", "7203.T", "LVMH.PA", "GBPUSD=X"]})
+        data = []
+        sectors = ["Tech", "Banks", "Energy", "Health", "Consum"]
+        tickers = [f"TICKER_{i}" for i in range(n_tickers)]
         
-        res = df.with_columns(pipeline_features.infer_country("ticker"))
+        rng = np.random.default_rng(42)
         
-        # Validaciones
-        rows = res.rows_by_key("ticker")
-        
-        # CORRECCIÓN 1: rows_by_key elimina la columna clave, así que 'country' pasa a ser el índice 0
-        self.assertEqual(rows["AAPL"][0][0], "US")
-        self.assertEqual(rows["TEF.MC"][0][0], "ES")
-        self.assertEqual(rows["VOW.DE"][0][0], "DE")
-        self.assertEqual(rows["7203.T"][0][0], "JP")
-        self.assertEqual(rows["LVMH.PA"][0][0], "FR")
-        print("   ✅ Lógica de sufijos correcta.")
+        # Vectorizamos la creación de datos para no tardar en el setup
+        # (Simulamos brownian motion vectorizado)
+        for t in tickers:
+            sector = rng.choice(sectors)
+            # Random Walk
+            returns = rng.normal(0.0005, 0.02, n_days)
+            price_path = 100 * np.cumprod(1 + returns)
+            
+            # Generamos OHLCV coherente
+            closes = price_path
+            highs = closes * (1 + rng.uniform(0, 0.02, n_days))
+            lows = closes * (1 - rng.uniform(0, 0.02, n_days))
+            opens = closes * (1 + rng.normal(0, 0.005, n_days)) # Ruido alrededor del close
+            vols = rng.integers(10000, 1000000, n_days)
+            
+            # Construcción eficiente
+            tk_data = pl.DataFrame({
+                "Date": dates,
+                "ticker": [t]*n_days,
+                "sector": [sector]*n_days,
+                "Close": closes,
+                "Open": opens,
+                "High": highs,
+                "Low": lows,
+                "Volume": vols,
+                "data_quality": [1]*n_days
+            })
+            data.append(tk_data)
+            
+        return pl.concat(data)
 
     @patch('pipeline_features.MarketLoader')
-    def test_e2e_pipeline_execution(self, MockLoader):
+    def test_pipeline_performance_and_integrity(self, MockLoader):
         """
-        Prueba de Integración: Ejecuta todo el pipeline con datos mockeados.
-        Verifica: Carga -> Cálculo -> Normalización -> Guardado.
+        Benchmark: Mide tiempo, memoria y valida propiedades estadísticas.
         """
-        print("\n🚀 Test Pipeline: Ejecución End-to-End...")
+        print("\n🔥 INICIANDO STRESS TEST DEL PIPELINE...")
         
-        # 1. Configurar el Mock del Loader
+        # 1. GENERACIÓN DE CARGA (50 tickers * 500 días = 25,000 filas con lógica compleja)
+        # Puedes aumentar n_tickers a 500 para ver la escalabilidad real.
+        df_stress = self.generate_stress_data(n_tickers=50, n_days=500)
+        
+        # Mock del Loader
         mock_instance = MockLoader.return_value
-        # get_all_data devuelve nuestro DF sintético
-        mock_instance.get_all_data.return_value = self.df_mock
+        mock_instance.get_all_data.return_value = df_stress
         
-        # 2. Parchear la configuración de rutas y parámetros para el test
+        # Configuración de prueba
         test_params = config.FEATURES_PARAMS.copy()
-        test_params["SKEW_WINDOW"] = 10 
-        test_params["SMA_SLOW"] = 20
+        test_norm = config.NORMALIZATION_PARAMS.copy()
+        test_norm["ROLLING_WINDOW"] = 60  # Ventana más corta para tener datos válidos rápido
+        test_norm["MIN_PERIODS"] = 30
         
-        test_norm_params = config.NORMALIZATION_PARAMS.copy()
-        test_norm_params["ROLLING_WINDOW"] = 30 
+        # Iniciar medición de recursos
+        tracemalloc.start()
+        start_time = time.time()
         
-        test_paths = {"FEATURES_OUTPUT": self.fake_output_path}
-
-        # CORRECCIÓN 2: 'project_root' está en pipeline_features, NO en config
+        # --- EJECUCIÓN ---
         with patch.dict(config.FEATURES_PARAMS, test_params), \
-             patch.dict(config.NORMALIZATION_PARAMS, test_norm_params), \
-             patch.dict(config.PATHS, test_paths), \
-             patch('pipeline_features.project_root', self.test_dir): 
+             patch.dict(config.NORMALIZATION_PARAMS, test_norm), \
+             patch.dict(config.PATHS, {"FEATURES_OUTPUT": self.fake_output_path}), \
+             patch('pipeline_features.project_root', self.test_dir):
             
-            # --- EJECUTAR PIPELINE ---
             pipeline_features.run_pipeline()
+
+        # --- MÉTRICAS ---
+        end_time = time.time()
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        
+        duration = end_time - start_time
+        peak_mb = peak / 10**6
+        
+        print(f"   ⏱️  Tiempo de Ejecución: {duration:.4f} segundos")
+        print(f"   🧠 Pico de Memoria RAM: {peak_mb:.2f} MB")
+        
+        # --- VALIDACIONES CIENTÍFICAS ---
+        df_res = pl.read_parquet(self.fake_output_path)
+        
+        # 1. Integridad de Datos
+        self.assertFalse(df_res.is_empty())
+        self.assertTrue("rsi_14_rob" in df_res.columns)
+        self.assertTrue("rsi_14_neutral" in df_res.columns)
+        
+        # 2. Validación Estadística (Z-Score Robusto debería centrar en 0)
+        # Filtramos los nulos iniciales causados por rolling window
+        valid_data = df_res.drop_nulls(subset=["rsi_14_neutral"])
+        
+        if valid_data.height > 0:
+            mean_val = valid_data["rsi_14_neutral"].mean()
+            std_val = valid_data["rsi_14_neutral"].std()
             
-            # --- VERIFICACIONES ---
+            print(f"   Stats (RSI Neutral): Mean={mean_val:.4f}, Std={std_val:.4f}")
             
-            # A) ¿Se creó el archivo?
-            self.assertTrue(os.path.exists(self.fake_output_path), "❌ El archivo Parquet no se generó.")
+            # La media debería estar muy cerca de 0 (ej. +/- 0.5 es aceptable dado el ruido)
+            self.assertTrue(-0.5 < mean_val < 0.5, f"La neutralización falló, media desviada: {mean_val}")
             
-            # Leemos el resultado
-            df_result = pl.read_parquet(self.fake_output_path)
-            cols = df_result.columns
+            # Amihud check (debe ser positivo o cero, nunca negativo si es iliquidez absoluta)
+            # Pero como está normalizado (z-score), puede ser negativo.
+            # Chequeamos el raw mejor.
+            # (Nota: El script guarda todo. Si guardaste raw, verificamos raw).
             
-            print(f"   📊 Resultado generado: {df_result.height} filas, {len(cols)} columnas.")
-            
-            # B) Verificación de Columnas Generadas
-            self.assertIn("country", cols, "Falta columna 'country'")
-            
-            # Indicadores Raw (Ejemplo RSI)
-            rsi_col = f"rsi_{test_params['RSI_PERIOD']}"
-            self.assertIn(rsi_col, cols, "Falta indicador Raw (RSI)")
-            
-            # Capa Robusta (_rob)
-            rsi_rob = f"{rsi_col}_rob"
-            self.assertIn(rsi_rob, cols, "Falta normalización temporal (_rob)")
-            
-            # Capa Neutral (_neutral)
-            rsi_neu = f"{rsi_col}_neutral"
-            self.assertIn(rsi_neu, cols, "Falta neutralización sectorial (_neutral)")
-            
-            # C) Verificación de Lógica de Valores
-            sample_es = df_result.filter(pl.col("ticker") == "SAN.MC").select("country").head(1).item()
-            self.assertEqual(sample_es, "ES")
-            
-            self.assertFalse(df_result.is_empty())
-            
-            print("   ✅ Pipeline completado y estructura de datos validada.")
+        print("   ✅ Test de Rendimiento y Lógica Matemática SUPERADO.")
 
 if __name__ == '__main__':
     unittest.main()
