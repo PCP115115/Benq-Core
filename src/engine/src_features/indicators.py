@@ -6,10 +6,7 @@ LOG_2 = np.log(2)
 PARKINSON_CONST = 1.0 / (4.0 * LOG_2)
 
 def get_log_returns(col_name: str = "Close") -> pl.Expr:
-    """
-    Calcula los retornos logarítmicos: ln(Pt / Pt-1).
-    Es preferible a los retornos simples por su propiedad de aditividad en el tiempo.
-    """
+    
     return (
         (pl.col(col_name) / pl.col(col_name).shift(1))
         .log()
@@ -152,3 +149,4 @@ def get_macd_expressions(col_name: str, fast: int, slow: int, signal: int) -> li
     macd_hist = (macd_line - macd_signal).alias("macd_hist")
     
     return [macd_line, macd_signal, macd_hist]
+
