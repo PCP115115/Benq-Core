@@ -34,8 +34,12 @@ Resuelve el problema de la **correlación de mercado (Beta)**. Aísla el rendimi
 * *Sufijo:* `_neutral` (ej. `rsi_14_neutral`).
 
 ---
-
+## Parámetros existentes:
+- **layer**: Define qué columnas devolver: "raw" (indicadores puros), "robust" (z-score temporal), "neutral" (z-score sectorial) o "all" (todo)
 ## 🚀 API Principal: `master_features.py`
+- **tickers**: Filtra que activos cargar.
+- **start_date**: Fecha de inicio
+- **end_date**: fecha de final
 
 La función `get_feature_matrix` orquesta la carga, cálculo (si es necesario) y filtrado de la matriz de características.
 
@@ -54,3 +58,5 @@ df_debug = get_feature_matrix(
     tickers=["AAPL", "MSFT"],
     layer="robust"
 )
+
+
