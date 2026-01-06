@@ -20,12 +20,12 @@ Este proyecto se encuentra en **Fase 1 (Data Core)**. De la siguiente hoja de ru
   - Control de calidad de datos (detección de *splits*, rellenado de huecos...) mediante `safety.py`.
   - Capa de almacenamiento OLAP basada en **DuckDB** y **Parquet**.
 
-- [ ] **Fase 2: Ingeniería de Factores** (Próximamente - T1 2026)
+- [x] **Fase 2: Ingeniería de Factores** (Próximamente - T1 2026)
   - Motor de indicadores técnicos optimizado con **Polars** y otros.
   - Análisis de microestructura (superficies de volatilidad, *proxies* de liquidez).
   - Otros datos derivados de la modelización.
 
-- [ ] **Fase 3: Motor de Simulación** (T1 2026)
+- [ ] **Fase 3: Modelización de los datos** (T1 2026)
   - Backtester vectorial basado en eventos (*Event-Driven*).
   - Gestión de cartera y métricas de riesgo (Sharpe, Sortino, MaxDD).
 
