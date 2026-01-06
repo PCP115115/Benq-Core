@@ -9,8 +9,8 @@
 
 * **`src/src_DD`**: Bloque de descarga de datos tipo: ETL pipeline utilizando la libreria `yfinance` con backoff exponencial, OLAP storage (DuckDB) y medidas de seguridad.
 * **`src/engine/`**:Cálculo de variables, indicadores y modelización.
-* **`src/backtesting/`**: 
-* **`src/strategies/`**: Aplicación de los cálculos.
+* **`src/dashboard/`**: Front-end para uso en producción.
+* **`src/strategies/`**: Aplicación de los cálculos a métodos de gestión de carteras...
 ## 🏗️ Arquitectura & ruta de trabajo:
 
 Este proyecto se encuentra en **Fase 1 (Data Core)**. De la siguiente hoja de ruta:
@@ -39,3 +39,4 @@ Este proyecto se encuentra en **Fase 1 (Data Core)**. De la siguiente hoja de ru
 ### Requisitos previos
 ```bash
 pip install -r requirements.txt
+
