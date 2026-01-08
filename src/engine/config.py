@@ -12,7 +12,12 @@ FEATURES_PARAMS = {
     # Volatilidad Avanzada (Range-Based)
     "PARKINSON_WINDOW": 20,       # Aumentado a 20 para alinear con el mes bursátil
     "GARMAN_KLASS_WINDOW": 20,    # [NUEVO] Para la nueva función GK. 20 es estándar industrial.
+    "YANG_ZHANG_WINDOW": 20,      # [NUEVO] Estimador Yang-Zhang (Drift independent + Gaps)
     
+    # [NUEVO] Conos de Volatilidad (Forecast Bounds)
+    "YZ_Z_SCORE": 1.96,           # Intervalo de confianza 95%
+    "YZ_FORECAST_HORIZON": 5,     # Proyección a 5 días (semana bursátil)
+
     # Liquidez
     "AMIHUD_WINDOW": 20,          # Ventana de media móvil para iliquidez
     "AMIHUD_SCALING": 1e6,        # [NUEVO] Sacado de la función. Permite ajustar según el activo.
