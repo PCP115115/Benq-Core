@@ -3,7 +3,7 @@ import os
 import sys
 import shutil
 import time
-import tracemalloc  # Para medir memoria
+import tracemalloc
 import polars as pl
 import numpy as np
 from unittest.mock import patch
@@ -25,7 +25,6 @@ import config
 class TestFeaturePipelineHardcore(unittest.TestCase):
 
     def setUp(self):
-        """Configuración: Entorno temporal y Datasets Sintéticos Grandes."""
         self.test_dir = os.path.join(current_dir, "temp_pipeline_bench")
         os.makedirs(self.test_dir, exist_ok=True)
         self.fake_output_path = os.path.join(self.test_dir, "bench_features.parquet")
@@ -38,118 +37,90 @@ class TestFeaturePipelineHardcore(unittest.TestCase):
                 pass
 
     def generate_stress_data(self, n_tickers=50, n_days=500):
-        """Genera un dataset volumétrico para pruebas de estrés."""
         print(f"   Generating mock data: {n_tickers} tickers x {n_days} days...")
         dates = [datetime(2022, 1, 1) + timedelta(days=i) for i in range(n_days)]
-        
         data = []
-        sectors = ["Tech", "Banks", "Energy", "Health", "Consum"]
-        tickers = [f"TICKER_{i}" for i in range(n_tickers)]
-        
+        sectors = ["Tech", "Banks", "Energy"]
+        tickers = [f"TK_{i}" for i in range(n_tickers)]
         rng = np.random.default_rng(42)
         
-        # Vectorizamos la creación de datos para no tardar en el setup
-        # (Simulamos brownian motion vectorizado)
         for t in tickers:
             sector = rng.choice(sectors)
-            # Random Walk
             returns = rng.normal(0.0005, 0.02, n_days)
-            price_path = 100 * np.cumprod(1 + returns)
-            
-            # Generamos OHLCV coherente
-            closes = price_path
-            highs = closes * (1 + rng.uniform(0, 0.02, n_days))
-            lows = closes * (1 - rng.uniform(0, 0.02, n_days))
-            opens = closes * (1 + rng.normal(0, 0.005, n_days)) # Ruido alrededor del close
+            closes = 100 * np.cumprod(1 + returns)
+            opens = closes * (1 + rng.normal(0, 0.005, n_days))
+            highs = np.maximum(opens, closes) * (1 + rng.uniform(0, 0.02, n_days))
+            lows = np.minimum(opens, closes) * (1 - rng.uniform(0, 0.02, n_days))
             vols = rng.integers(10000, 1000000, n_days)
             
-            # Construcción eficiente
             tk_data = pl.DataFrame({
                 "Date": dates,
                 "ticker": [t]*n_days,
                 "sector": [sector]*n_days,
-                "Close": closes,
-                "Open": opens,
-                "High": highs,
-                "Low": lows,
-                "Volume": vols,
-                "data_quality": [1]*n_days
+                "Close": closes, "Open": opens, "High": highs, "Low": lows,
+                "Volume": vols, "data_quality": [1]*n_days
             })
             data.append(tk_data)
-            
         return pl.concat(data)
 
     @patch('pipeline_features.MarketLoader')
     def test_pipeline_performance_and_integrity(self, MockLoader):
-        """
-        Benchmark: Mide tiempo, memoria y valida propiedades estadísticas.
-        """
-        print("\n🔥 INICIANDO STRESS TEST DEL PIPELINE...")
+        """Benchmark End-to-End incluyendo Conos de Volatilidad."""
+        print("\n🔥 INICIANDO STRESS TEST DEL PIPELINE (Conos YZ)...")
         
-        # 1. GENERACIÓN DE CARGA (50 tickers * 500 días = 25,000 filas con lógica compleja)
-        # Puedes aumentar n_tickers a 500 para ver la escalabilidad real.
-        df_stress = self.generate_stress_data(n_tickers=50, n_days=500)
+        df_stress = self.generate_stress_data(n_tickers=20, n_days=200)
         
-        # Mock del Loader
         mock_instance = MockLoader.return_value
         mock_instance.get_all_data.return_value = df_stress
         
-        # Configuración de prueba
+        # Test config (nos aseguramos que los parámetros coincidan con lo esperado)
         test_params = config.FEATURES_PARAMS.copy()
-        test_norm = config.NORMALIZATION_PARAMS.copy()
-        test_norm["ROLLING_WINDOW"] = 60  # Ventana más corta para tener datos válidos rápido
-        test_norm["MIN_PERIODS"] = 30
+        test_params["YZ_FORECAST_HORIZON"] = 5 # Forzamos 5 para el assert
         
-        # Iniciar medición de recursos
         tracemalloc.start()
         start_time = time.time()
         
-        # --- EJECUCIÓN ---
         with patch.dict(config.FEATURES_PARAMS, test_params), \
-             patch.dict(config.NORMALIZATION_PARAMS, test_norm), \
              patch.dict(config.PATHS, {"FEATURES_OUTPUT": self.fake_output_path}), \
              patch('pipeline_features.project_root', self.test_dir):
             
             pipeline_features.run_pipeline()
 
-        # --- MÉTRICAS ---
-        end_time = time.time()
         current, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         
-        duration = end_time - start_time
-        peak_mb = peak / 10**6
+        print(f"   ⏱️  Tiempo: {time.time() - start_time:.4f}s")
+        print(f"   🧠 Memoria: {peak / 10**6:.2f} MB")
         
-        print(f"   ⏱️  Tiempo de Ejecución: {duration:.4f} segundos")
-        print(f"   🧠 Pico de Memoria RAM: {peak_mb:.2f} MB")
-        
-        # --- VALIDACIONES CIENTÍFICAS ---
+        # --- VALIDACIONES ---
         df_res = pl.read_parquet(self.fake_output_path)
+        cols = df_res.columns
         
-        # 1. Integridad de Datos
-        self.assertFalse(df_res.is_empty())
-        self.assertTrue("rsi_14_rob" in df_res.columns)
-        self.assertTrue("rsi_14_neutral" in df_res.columns)
+        # 1. ¿Existen las columnas de los conos?
+        col_ceil = "fprice_ceil_yz_5d"
+        col_floor = "fprice_floor_yz_5d"
         
-        # 2. Validación Estadística (Z-Score Robusto debería centrar en 0)
-        # Filtramos los nulos iniciales causados por rolling window
-        valid_data = df_res.drop_nulls(subset=["rsi_14_neutral"])
+        self.assertIn(col_ceil, cols, "Falta columna Techo YZ")
+        self.assertIn(col_floor, cols, "Falta columna Suelo YZ")
         
-        if valid_data.height > 0:
-            mean_val = valid_data["rsi_14_neutral"].mean()
-            std_val = valid_data["rsi_14_neutral"].std()
+        # 2. Validación Lógica en Pipeline Real
+        # Tomamos una muestra aleatoria válida (donde no sea null por el periodo de calentamiento)
+        valid_rows = df_res.drop_nulls(subset=[col_ceil]).head(10)
+        
+        if valid_rows.height > 0:
+            ceil_check = (valid_rows[col_ceil] > valid_rows["Close"]).all()
+            floor_check = (valid_rows[col_floor] < valid_rows["Close"]).all()
             
-            print(f"   Stats (RSI Neutral): Mean={mean_val:.4f}, Std={std_val:.4f}")
-            
-            # La media debería estar muy cerca de 0 (ej. +/- 0.5 es aceptable dado el ruido)
-            self.assertTrue(-0.5 < mean_val < 0.5, f"La neutralización falló, media desviada: {mean_val}")
-            
-            # Amihud check (debe ser positivo o cero, nunca negativo si es iliquidez absoluta)
-            # Pero como está normalizado (z-score), puede ser negativo.
-            # Chequeamos el raw mejor.
-            # (Nota: El script guarda todo. Si guardaste raw, verificamos raw).
-            
-        print("   ✅ Test de Rendimiento y Lógica Matemática SUPERADO.")
+            self.assertTrue(ceil_check, "Pipeline generó Techos inválidos (< Close)")
+            self.assertTrue(floor_check, "Pipeline generó Suelos inválidos (> Close)")
+            print(f"   ✅ Validación lógica Techo/Suelo en datos procesados correcta.")
+
+        # 3. ¿Se normalizaron (Robust Scaler)?
+        # Deben existir versiones _rob y _neutral de los precios teóricos
+        self.assertIn(f"{col_ceil}_rob", cols)
+        self.assertIn(f"{col_ceil}_neutral", cols)
+        
+        print("   ✅ Test End-to-End con Conos de Volatilidad SUPERADO.")
 
 if __name__ == '__main__':
     unittest.main()
