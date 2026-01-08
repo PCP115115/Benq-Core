@@ -7,8 +7,8 @@ import time
 # --- CONFIGURACIÓN DE RUTAS E IMPORTACIONES ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 engine_dir = os.path.dirname(os.path.dirname(current_dir)) # src/engine
-src_dir = os.path.dirname(engine_dir)                    # src
-project_root = os.path.dirname(src_dir)                  # Root
+src_dir = os.path.dirname(engine_dir)                     # src
+project_root = os.path.dirname(src_dir)                   # Root
 
 # Añadimos rutas al path
 sys.path.append(src_dir) 
@@ -31,16 +31,43 @@ logging.basicConfig(
 logger = logging.getLogger("FeaturePipeline")
 
 def infer_country(ticker_col: str = "ticker") -> pl.Expr:
-    """Infiere el país basado en el sufijo de Yahoo Finance."""
+    """
+    Infiere el código ISO del país basado en el sufijo del Ticker (Yahoo Finance).
+    Cubre: Europa, Norteamérica, Asia/Pacífico y Latam.
+    """
+    t = pl.col(ticker_col)
+    
     return (
-        pl.when(pl.col(ticker_col).str.ends_with(".MC")).then(pl.lit("ES"))
-        .when(pl.col(ticker_col).str.ends_with(".DE")).then(pl.lit("DE"))
-        .when(pl.col(ticker_col).str.ends_with(".L")).then(pl.lit("UK"))
-        .when(pl.col(ticker_col).str.ends_with(".PA")).then(pl.lit("FR"))
-        .when(pl.col(ticker_col).str.ends_with(".T")).then(pl.lit("JP"))
-        .when(pl.col(ticker_col).str.ends_with(".HK")).then(pl.lit("HK"))
-        .when(pl.col(ticker_col).str.contains("=")).then(pl.lit("FX/COM")) 
-        .otherwise(pl.lit("US")) 
+        # --- EUROPA ---
+        pl.when(t.str.ends_with(".DE")).then(pl.lit("DE"))      # Alemania
+        .when(t.str.ends_with(".PA")).then(pl.lit("FR"))        # Francia
+        .when(t.str.ends_with(".MC")).then(pl.lit("ES"))        # España
+        .when(t.str.ends_with(".MI")).then(pl.lit("IT"))        # Italia
+        .when(t.str.ends_with(".AS")).then(pl.lit("NL"))        # Holanda (Amsterdam)
+        .when(t.str.ends_with(".L")).then(pl.lit("UK"))         # Reino Unido
+        .when(t.str.ends_with(".SW")).then(pl.lit("CH"))        # Suiza (Swiss)
+        .when(t.str.ends_with(".ST")).then(pl.lit("SE"))        # Suecia (Stockholm)
+        .when(t.str.ends_with(".OL")).then(pl.lit("NO"))        # Noruega (Oslo)
+        
+        # --- ASIA / PACÍFICO ---
+        .when(t.str.ends_with(".T")).then(pl.lit("JP"))         # Japón
+        .when(t.str.ends_with(".HK")).then(pl.lit("HK"))        # Hong Kong
+        .when(t.str.ends_with(".SS").or_(t.str.ends_with(".SZ"))).then(pl.lit("CN")) # China (Shanghai/Shenzhen)
+        .when(t.str.ends_with(".KS")).then(pl.lit("KR"))        # Corea (KOSPI)
+        .when(t.str.ends_with(".TW")).then(pl.lit("TW"))        # Taiwán
+        .when(t.str.ends_with(".AX")).then(pl.lit("AU"))        # Australia
+        .when(t.str.ends_with(".NS").or_(t.str.ends_with(".BO"))).then(pl.lit("IN")) # India (NSE/BSE)
+        
+        # --- AMÉRICA (LATAM + CANADÁ) ---
+        .when(t.str.ends_with(".TO").or_(t.str.ends_with(".V"))).then(pl.lit("CA"))  # Canadá (Toronto/Venture)
+        .when(t.str.ends_with(".SA")).then(pl.lit("BR"))        # Brasil (Sao Paulo)
+        .when(t.str.ends_with(".MX")).then(pl.lit("MX"))        # México
+        
+        # --- ACTIVOS NO BURSÁTILES ---
+        .when(t.str.contains("=")).then(pl.lit("FX/COM"))       # Forex o Commodities
+        
+        # --- DEFAULT (US) ---
+        .otherwise(pl.lit("US"))                                # Sin sufijo suele ser NYSE/NASDAQ
         .alias("country")
     )
 
@@ -96,8 +123,9 @@ def run_pipeline():
     
     p = config.FEATURES_PARAMS
     
+    # 1.1 Indicadores Base (Volatilidad, RSI, MACD...)
     calc_exprs = [
-        # --- ESTADÍSTICA DE RETORNOS (CORREGIDO: Usan log_returns) ---
+        # --- ESTADÍSTICA DE RETORNOS ---
         indicators.get_rolling_volatility("log_returns", p["VOLATILITY_WINDOW"]),
         indicators.get_rolling_skewness("log_returns", p["SKEW_WINDOW"]),
         indicators.get_volume_return_correlation("log_returns", "Volume", p["CORR_WINDOW"]),
@@ -116,8 +144,10 @@ def run_pipeline():
         # --- VOLATILIDAD AVANZADA (Range-Based) ---
         indicators.get_parkinson_volatility("High", "Low", p["PARKINSON_WINDOW"]),
         indicators.get_garman_klass_volatility("High", "Low", "Close", "Open", p["GARMAN_KLASS_WINDOW"]),
+        # Yang-Zhang Volatility
+        indicators.get_yang_zhang_volatility("Open", "High", "Low", "Close", p["YANG_ZHANG_WINDOW"]),
         
-        # --- LIQUIDEZ (CORREGIDO: Input correcto + Config Scaling) ---
+        # --- LIQUIDEZ ---
         indicators.get_amihud_liquidity(
             "abs_log_returns", "Close", "Volume", 
             window=p["AMIHUD_WINDOW"], 
@@ -125,8 +155,21 @@ def run_pipeline():
         )
     ]
 
-    lf_indicators = lf_with_returns.with_columns([
+    lf_indicators_step1 = lf_with_returns.with_columns([
         expr.over("ticker") for expr in calc_exprs
+    ])
+
+    # 1.2 Derivados de Volatilidad (Requieren que vol_yz exista)
+    # Nombre dinámico de la columna de volatilidad calculada en el paso anterior
+    yz_col_name = f"vol_yz_{p['YANG_ZHANG_WINDOW']}d"
+    
+    lf_indicators = lf_indicators_step1.with_columns([
+        *indicators.get_volatility_bounds(
+            col_close="Close",
+            col_vol_yz=yz_col_name,
+            z_score=p["YZ_Z_SCORE"],
+            horizon=p["YZ_FORECAST_HORIZON"]
+        )
     ])
 
     # 4. NORMALIZACIÓN TEMPORAL (Robust Scaling por Activo)
@@ -141,7 +184,7 @@ def run_pipeline():
         "abs_log_returns" 
     }
     
-    # Seleccionamos todo lo demás para normalizar (incluyendo log_returns)
+    # Seleccionamos todo lo demás para normalizar (incluyendo log_returns y los nuevos conos)
     cols_to_normalize = [c for c in schema.names() if c not in cols_meta]
     
     roll_window = config.NORMALIZATION_PARAMS["ROLLING_WINDOW"]

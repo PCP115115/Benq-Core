@@ -110,6 +110,64 @@ def get_garman_klass_volatility(col_high: str, col_low: str, col_close: str, col
         .alias(f"vol_gk_{window}d")
     )
 
+def get_yang_zhang_volatility(col_open: str, col_high: str, col_low: str, col_close: str, window: int) -> pl.Expr:
+    """
+    Volatilidad de Yang-Zhang (Drift Independent + Gaps).
+    Combina volatilidad Overnight, Open-Close y Rogers-Satchell.
+    Formula: sqrt( Var_Overnight + k * Var_OpenClose + (1-k) * Var_RS )
+    """
+    # 1. Cálculo de k dinámico
+    n = window
+    k = 0.34 / (1.34 + (n + 1) / (n - 1))
+    
+    # 2. Logaritmos base
+    log_o = pl.col(col_open).log()
+    log_h = pl.col(col_high).log()
+    log_l = pl.col(col_low).log()
+    log_c = pl.col(col_close).log()
+    log_c_prev = log_c.shift(1)
+    
+    # 3. Componente Overnight: Varianza de ln(Open_t / Close_t-1)
+    # drift-independent implica usar varianza muestral
+    term_overnight_var = (log_o - log_c_prev).rolling_var(window_size=window)
+    
+    # 4. Componente Open-Close: Varianza de ln(Close_t / Open_t)
+    term_open_close_var = (log_c - log_o).rolling_var(window_size=window)
+    
+    # 5. Componente Rogers-Satchell (RS): Media rodante
+    # RS = ln(H/C)ln(H/O) + ln(L/C)ln(L/O)
+    rs_raw = (
+        ((log_h - log_c) * (log_h - log_o)) + 
+        ((log_l - log_c) * (log_l - log_o))
+    )
+    term_rs_var = rs_raw.rolling_mean(window_size=window)
+    
+    # 6. Combinación Ponderada
+    yz_variance = (
+        term_overnight_var + 
+        (k * term_open_close_var) + 
+        ((1.0 - k) * term_rs_var)
+    )
+    
+    return (
+        yz_variance.sqrt()
+        .alias(f"vol_yz_{window}d")
+    )
+
+def get_volatility_bounds(col_close: str, col_vol_yz: str, z_score: float, horizon: int) -> list[pl.Expr]:
+    """
+    Genera Conos de Volatilidad (Techo y Suelo) basados en la proyección de Yang-Zhang.
+    Formula: Price * (1 +/- Z * Vol * sqrt(T))
+    """
+    # Factor de proyección: Volatilidad * Z * sqrt(Tiempo)
+    # Importante: np.sqrt es escalar aquí, lo cual es eficiente.
+    projection_factor = pl.col(col_vol_yz) * z_score * np.sqrt(horizon)
+    
+    ceil = (pl.col(col_close) * (1 + projection_factor)).alias(f"fprice_ceil_yz_{horizon}d")
+    floor = (pl.col(col_close) * (1 - projection_factor)).alias(f"fprice_floor_yz_{horizon}d")
+    
+    return [ceil, floor]
+
 def get_amihud_liquidity(col_abs_ret: str, col_price: str, col_vol: str, window: int, scaling_factor: float = 1e6) -> pl.Expr:
     """
     Iliquidez de Amihud (Proxy de Impacto en Mercado).
@@ -128,6 +186,7 @@ def get_rsi(col_name: str, period: int) -> pl.Expr:
     """
     Relative Strength Index (RSI).
     ACTUALIZADO: Usa 'com' en lugar de 'span' para replicar Wilder's Smoothing.
+    CORREGIDO: Usa 'min_samples' en lugar de 'min_periods' (Deprecation Fix).
     alpha = 1 / period  <=> com = period - 1
     """
     delta = pl.col(col_name).diff()
@@ -137,8 +196,9 @@ def get_rsi(col_name: str, period: int) -> pl.Expr:
 
     wilder_com = period - 1
     
-    roll_up = up.ewm_mean(min_periods=period, adjust=False, com=wilder_com)
-    roll_down = down.ewm_mean(min_periods=period, adjust=False, com=wilder_com)
+    # Fix: min_periods -> min_samples
+    roll_up = up.ewm_mean(min_samples=period, adjust=False, com=wilder_com)
+    roll_down = down.ewm_mean(min_samples=period, adjust=False, com=wilder_com)
     
     rs = roll_up / roll_down
     return (
