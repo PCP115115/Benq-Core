@@ -52,3 +52,40 @@ NORMALIZATION_PARAMS = {
 PATHS = {
     "FEATURES_OUTPUT": "data/processed/features_matrix.parquet"
 }
+
+
+
+# --- PARÁMETROS DE INTELIGENCIA DEL MÓDULO DE RÉGIMEN DE MERCADO (CONTEXT) ---
+CONTEXT_PARAMS = {
+    # Features de entrada para el Autoencoder (Deben existir en indicators.py)
+    # Seleccionamos: Volatilidad, Eficiencia, Liquidez y Correlación
+    "INPUT_FEATURES": [
+        "vol_yz_20d", 
+        "ker_10", 
+        "amihud_20d", 
+        "corr_price_vol_20d"
+    ],
+    
+    "LSTM_WINDOW_SIZE": 20,       # Lookback window (T) para la red neuronal
+    "NORMALIZATION_WINDOW": 63,   # Ventana trimestral para el Robust Scaler dinámico
+    
+    # Configuración del Modelo
+    "LSTM_HIDDEN_DIM": 32,        # Dimensión de las neuronas
+    "LSTM_LATENT_DIM": 10,        # Dimensión comprimida (Features latentes)
+    "LSTM_LAYERS": 1,
+    "LSTM_EPOCHS": 50,
+    "LSTM_BATCH_SIZE": 64,
+    "LSTM_LR": 1e-3,
+    
+    "GMM_N_COMPONENTS": 5,        # Número de Regímenes de Mercado
+    "GMM_COVARIANCE_TYPE": "full"
+}
+
+# --- RUTAS ACTUALIZADAS ---
+PATHS = {
+    "FEATURES_OUTPUT": "data/processed/features_matrix.parquet",
+    
+    # Modelos entrenados
+    "MODEL_LSTM": "data/models/context_lstm.pth",
+    "MODEL_GMM": "data/models/context_gmm.joblib"
+}
