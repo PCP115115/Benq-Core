@@ -57,7 +57,8 @@ def get_feature_matrix(
     start_date: Optional[Union[str, datetime]] = None,
     end_date: Optional[Union[str, datetime]] = None,
     layer: str = "all",
-    features: Optional[Union[str, List[str]]] = None
+    features: Optional[Union[str, List[str]]] = None,
+    normalization_window: Optional[int] = None  # <--- NUEVO PARÁMETRO
 ) -> pl.DataFrame:
     """
     API PRINCIPAL PARA CONSUMO DE DATOS EN MODELOS QUANT.
@@ -69,20 +70,13 @@ def get_feature_matrix(
         tickers: Ticker individual o lista de tickers.
         start_date: Fecha de inicio (inclusiva).
         end_date: Fecha de fin (inclusiva).
-        layer: Nivel de procesamiento:
-               - 'raw': Indicadores técnicos puros.
-               - 'robust': Normalizados temporalmente (Rolling Z-Score).
-               - 'neutral': Neutralizados por sector.
-               - 'all': Universo completo.
-        features: Filtro de columnas por palabra clave (substring). 
-                  Ej: ["rsi", "volatility"]. Si es None o "all", devuelve todo lo de la layer.
-                  NOTA: 'Date' y 'ticker' siempre se devuelven.
+        layer: Nivel de procesamiento ('raw', 'robust', 'neutral', 'all').
+        features: Filtro de columnas por palabra clave.
+        normalization_window: Si se define (int), aplica normalización robusta al vuelo 
+                              con esa ventana, ignorando 'layer'.
 
     Returns:
         pl.DataFrame: Matriz de features filtrada.
-    
-    Raises:
-        ValueError: Si el filtro de 'features' no produce ninguna columna válida en la 'layer' seleccionada.
     """
     
     # 1. Auto-healing: Cold Start Check
@@ -95,7 +89,7 @@ def get_feature_matrix(
             logger.error("❌ No se pudo generar la matriz de features.")
             return pl.DataFrame()
 
-    logger.info(f"📂 Cargando matriz de features (Layer: {layer} | Features Filter: {features})...")
+    logger.info(f"📂 Cargando matriz (Layer: {layer} | Features: {features} | NormWindow: {normalization_window})...")
     
     try:
         # Iniciamos LazyFrame para Push-down optimization
@@ -118,97 +112,132 @@ def get_feature_matrix(
             q = q.filter(pl.col("Date") <= pl.lit(dt_end))
 
         # -----------------------------------------------------------
-        # 3. LÓGICA DE SELECCIÓN DE COLUMNAS (INTERSECCIÓN LAYER + FEATURES)
+        # 3. LÓGICA DE SELECCIÓN DE COLUMNAS
         # -----------------------------------------------------------
         
-        # Obtenemos esquema para determinar disponibilidad
-        schema = q.collect_schema()
-        all_cols = schema.names()
-        
-        # Definición de conjuntos de metadatos
-        # Date y ticker son "Intocables" (Primary Keys)
-        MANDATORY_COLS = {"Date", "ticker"} 
-        # Otros metadatos (pueden ser filtrados si el usuario pide features específicos)
-        META_COLS = {"sector", "country", "data_quality", "Close", "Open", "High", "Low", "Volume"}
-        ALL_META = MANDATORY_COLS.union(META_COLS)
+        # === MODO A: NORMALIZACIÓN DINÁMICA (NUEVO) ===
+        if normalization_window is not None:
+            # 1. Identificar columnas RAW objetivo
+            target_keywords = []
+            if features and features != "all":
+                if isinstance(features, str): target_keywords = [features]
+                else: target_keywords = features
+            
+            schema = q.collect_schema()
+            all_cols = schema.names()
+            
+            # Definir columnas meta y excluidas
+            excluded_suffixes = ("_rob", "_neutral")
+            meta_cols = {"Date", "ticker", "sector", "country", "data_quality", "Close", "Open", "High", "Low", "Volume"}
+            
+            # Seleccionar columnas que sean RAW y coincidan con keywords (si las hay)
+            target_cols = []
+            for col in all_cols:
+                if col in meta_cols: continue
+                if col.endswith(excluded_suffixes): continue
+                
+                # Si hay filtro de features, debe coincidir
+                if target_keywords:
+                    if not any(kw in col for kw in target_keywords):
+                        continue
+                
+                target_cols.append(col)
 
-        # A. Determinar el Universo disponible según LAYER
-        candidates = []
-        if layer == "all":
-            candidates = all_cols
+            if not target_cols:
+                logger.warning("⚠️ No se encontraron columnas RAW para normalizar con los filtros dados.")
+                return pl.DataFrame()
+
+            # 2. Seleccionar (Date/Ticker + Targets)
+            q = q.select(["Date", "ticker"] + target_cols)
+
+            # 3. Aplicar Robust Scaler Rolling por Ticker
+            # Z = (X - Median) / IQR
+            exprs_norm = []
+            for col in target_cols:
+                roll_med = pl.col(col).rolling_median(normalization_window)
+                roll_q75 = pl.col(col).rolling_quantile(0.75, window_size=normalization_window)
+                roll_q25 = pl.col(col).rolling_quantile(0.25, window_size=normalization_window)
+                iqr = (roll_q75 - roll_q25).replace(0, None) # Evitar div/0 (NULL si IQR es 0)
+                
+                # Sobrescribimos la columna con su versión normalizada y rellenamos nulos con 0
+                expr = ((pl.col(col) - roll_med) / iqr).fill_null(0).alias(col)
+                exprs_norm.append(expr)
+            
+            q = q.with_columns([e.over("ticker") for e in exprs_norm])
+            
+            # 4. Limpieza de NaNs iniciales (periodo de calentamiento)
+            q = q.drop_nulls()
+
+        # === MODO B: LÓGICA ESTÁNDAR (ORIGINAL) ===
         else:
-            # Clasificación de columnas por sufijo
-            neutral_cols = [c for c in all_cols if c.endswith("_neutral")]
-            robust_cols = [c for c in all_cols if c.endswith("_rob")]
-            # Raw son las que no tienen sufijos de procesamiento y no son meta (o son meta base)
-            raw_feature_cols = [
-                c for c in all_cols 
-                if c not in ALL_META 
-                and not c.endswith("_neutral") 
-                and not c.endswith("_rob")
-            ]
+            # Obtenemos esquema para determinar disponibilidad
+            schema = q.collect_schema()
+            all_cols = schema.names()
             
-            # Construimos el set base de la layer (incluyendo meta por defecto)
-            # Nota: La meta se refina después si hay filtro de features
-            base_meta = [c for c in all_cols if c in ALL_META]
-            
-            if layer == "neutral":
-                candidates = base_meta + neutral_cols
-            elif layer == "robust":
-                candidates = base_meta + robust_cols
-            elif layer == "raw":
-                candidates = base_meta + raw_feature_cols
+            # Definición de conjuntos de metadatos
+            MANDATORY_COLS = {"Date", "ticker"} 
+            META_COLS = {"sector", "country", "data_quality", "Close", "Open", "High", "Low", "Volume"}
+            ALL_META = MANDATORY_COLS.union(META_COLS)
 
-        # B. Aplicar filtro de FEATURES (Intersección)
-        final_columns = []
-        
-        # Normalizamos input de features
-        feature_filter_active = False
-        target_keywords = []
-
-        if features is not None and features != "all":
-            feature_filter_active = True
-            if isinstance(features, str):
-                target_keywords = [features]
+            # A. Determinar el Universo disponible según LAYER
+            candidates = []
+            if layer == "all":
+                candidates = all_cols
             else:
-                target_keywords = features
-
-        if not feature_filter_active:
-            # Si no hay filtro específico, devolvemos todo lo que permite la layer
-            final_columns = candidates
-        else:
-            # LÓGICA STRICT DE FILTRADO
-            # 1. Siempre incluir MANDATORY (Date, ticker)
-            # 2. Incluir columna SI Y SOLO SI contiene alguna keyword solicitada
-            
-            matched_count = 0
-            
-            for col in candidates:
-                # Condición 1: Es obligatoria
-                if col in MANDATORY_COLS:
-                    final_columns.append(col)
-                    continue
+                neutral_cols = [c for c in all_cols if c.endswith("_neutral")]
+                robust_cols = [c for c in all_cols if c.endswith("_rob")]
+                raw_feature_cols = [
+                    c for c in all_cols 
+                    if c not in ALL_META 
+                    and not c.endswith("_neutral") 
+                    and not c.endswith("_rob")
+                ]
                 
-                # Condición 2: Match por substring
-                # "rsi" debe estar en "rsi_14_neutral" -> True
-                # "rsi" en "Close" -> False (Close se elimina si no se pidió explícitamente)
-                is_match = any(kw in col for kw in target_keywords)
+                base_meta = [c for c in all_cols if c in ALL_META]
                 
-                if is_match:
-                    final_columns.append(col)
-                    matched_count += 1
-            
-            # CHECK DE SEGURIDAD (Safety)
-            if matched_count == 0:
-                error_msg = (
-                    f"❌ Filtro inválido: No se encontraron columnas en la layer '{layer}' "
-                    f"que coincidan con los criterios: {target_keywords}."
-                )
-                logger.error(error_msg)
-                raise ValueError(error_msg)
+                if layer == "neutral":
+                    candidates = base_meta + neutral_cols
+                elif layer == "robust":
+                    candidates = base_meta + robust_cols
+                elif layer == "raw":
+                    candidates = base_meta + raw_feature_cols
 
-        # Aplicar proyección (Push-down projection)
-        q = q.select(final_columns)
+            # B. Aplicar filtro de FEATURES (Intersección)
+            final_columns = []
+            feature_filter_active = False
+            target_keywords = []
+
+            if features is not None and features != "all":
+                feature_filter_active = True
+                if isinstance(features, str):
+                    target_keywords = [features]
+                else:
+                    target_keywords = features
+
+            if not feature_filter_active:
+                final_columns = candidates
+            else:
+                matched_count = 0
+                for col in candidates:
+                    if col in MANDATORY_COLS:
+                        final_columns.append(col)
+                        continue
+                    
+                    is_match = any(kw in col for kw in target_keywords)
+                    if is_match:
+                        final_columns.append(col)
+                        matched_count += 1
+                
+                if matched_count == 0:
+                    error_msg = (
+                        f"❌ Filtro inválido: No se encontraron columnas en la layer '{layer}' "
+                        f"que coincidan con los criterios: {target_keywords}."
+                    )
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
+
+            # Aplicar proyección
+            q = q.select(final_columns)
 
         # -----------------------------------------------------------
         # 4. MATERIALIZACIÓN Y RETORNO
@@ -223,12 +252,9 @@ def get_feature_matrix(
         return df
 
     except ValueError as ve:
-        # Re-lanzamos ValueErrors (validación de lógica de negocio)
         raise ve
     except Exception as e:
         logger.error(f"❌ Error leyendo datos: {e}")
-        # En caso de error de I/O u otro imprevisto, devolvemos vacío para no romper procesos batch masivos
-        # salvo que sea un error de lógica de filtrado (ValueError arriba)
         return pl.DataFrame()
 
 if __name__ == "__main__":
@@ -237,7 +263,8 @@ if __name__ == "__main__":
     # try:
     #     df = get_feature_matrix(
     #         tickers=["AAPL", "MSFT"], 
-    #         layer="neutral", 
+    #         layer="raw", 
+    #         normalization_window=63,
     #         features=["rsi", "volatility"]
     #     )
     #     print(df.head())
