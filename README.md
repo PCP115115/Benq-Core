@@ -1,11 +1,12 @@
-# 🏛️ Ben Quant Core
+# 🏛️ BenQ-Core
 
 ![Status](https://img.shields.io/badge/Status-Active_Development-green)
 ![Architecture](https://img.shields.io/badge/Architecture-Modular_Monolith-blue)
+![Licence](https://img.shields.io/badge/license-MIT-purple)
+![Version](https://img.shields.io/badge/version-1-orange)
 
-> **Ben Quant Core** es un programa de análisis de activos integral que esta siendo desarrollado de manera activa.
-
-## 📂 Arquitectura del programa:
+> **Ben Quant Core**Benq-Core is an end-to-end quantitative research framework designed for high-performance stock analysis. It combines robust data engineering with unsupervised deep learning to identify market regimes, model asset behavior, and develop data-driven strategies aimed at achieving consistent alpha.
+## 📂 System arquitecture:
 
 * **`src/src_DD`**: Bloque de descarga de datos tipo: ETL pipeline utilizando la libreria `yfinance` con backoff exponencial, OLAP storage (DuckDB) y medidas de seguridad.
 * **`src/engine/`**:Cálculo de variables, indicadores y modelización.
