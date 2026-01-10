@@ -1,36 +1,41 @@
-# 🏛️ Data Core: Pipeline de Ingesta y Gestión de Datos de Mercado
+***
 
-Este módulo implementa una arquitectura **ETL (Extract, Transform, Load)** de grado institucional diseñada para construir y mantener un *Data Lake* local de series temporales financieras.
+###  `instructions_data_downloader.md`
 
-A diferencia de scripts de descarga simples, este núcleo prioriza la **integridad de los datos** (detección de splits, auditoría de gaps) y la **eficiencia de consulta** (OLAP via DuckDB).
 
-## 🏗️ Arquitectura del Sistema
+# 🏛️ Data Core: Ingestion and Market Data Management Pipeline
 
-El flujo de datos se orquesta a través de tres etapas secuenciales gestionadas por `master_data_loader.py`:
+This module implements an institutional-grade **ETL (Extract, Transform, Load)** architecture designed to build and maintain a local *Data Lake* of financial time series.
 
-### 1. Extracción Resiliente (`download.py`)
-* **Motor:** `yfinance` con *wrappers* personalizados.
-* **Concurrencia:** Ejecución multihilo (`ThreadPoolExecutor`) para maximizar el ancho de banda.
-* **Lógica Incremental:** Detecta automáticamente la última fecha disponible en disco y descarga solo el *delta* necesario, minimizando el tráfico de red y el tiempo de ejecución.
-* **Manejo de Errores:** Implementa *Exponential Backoff* para reintentar peticiones fallidas sin saturar la API del proveedor.
+Unlike simple download scripts, this core prioritizes **data integrity** (split detection, gap auditing) and **query efficiency** (OLAP via DuckDB).
 
-### 2. Transformación y Auditoría (`safety.py`)
-Actúa como un *firewall* de calidad antes de que los datos sean consumidos:
-* **Alineación de Calendarios:** Cruza cada activo contra un índice de referencia (ej. `^GSPC`, `^IBEX`) para validar días de negociación reales.
-* **Detección de Splits:** Algoritmo heurístico que identifica caídas de precio >30% no explicadas por el mercado (caída del benchmark >-25%). Si se detecta, purga el archivo corrupto para forzar una re-descarga limpia.
-* **Reparación de Series:** Rellena huecos (*gaps*) menores mediante *Forward Fill* y marca estos registros con `data_quality=0` para que los modelos puedan discriminarlos.
+## 🏗️ System Architecture
 
-### 3. Carga y Acceso OLAP (`loader.py`)
-* **Virtualización:** No carga todos los CSV/Parquet en RAM. Utiliza **DuckDB** para montar una vista SQL virtual sobre los archivos físicos.
-* **Zero-Copy:** Transfiere los resultados de las consultas a **Polars** utilizando Apache Arrow, garantizando una latencia mínima incluso con millones de filas.
+The data flow is orchestrated through three sequential stages managed by `master_data_loader.py`:
+
+### 1. Resilient Extraction (`download.py`)
+* **Engine:** `yfinance` with custom *wrappers*.
+* **Concurrency:** Multi-threaded execution (`ThreadPoolExecutor`) to maximize bandwidth.
+* **Incremental Logic:** Automatically detects the last available date on disk and downloads only the necessary *delta*, minimizing network traffic and execution time.
+* **Error Handling:** Implements *Exponential Backoff* to retry failed requests without saturating the provider's API.
+
+### 2. Transformation and Audit (`safety.py`)
+Acts as a quality *firewall* before data is consumed:
+* **Calendar Alignment:** Cross-references each asset against a benchmark index (e.g., `^GSPC`, `^IBEX`) to validate real trading days.
+* **Split Detection:** Heuristic algorithm that identifies price drops >30% not explained by the market (benchmark drop >-25%). If detected, it purges the corrupt file to force a clean re-download.
+* **Series Repair:** Fills minor gaps via *Forward Fill* and marks these records with `data_quality=0` so models can discriminate them.
+
+### 3. Loading and OLAP Access (`loader.py`)
+* **Virtualization:** Does not load all CSV/Parquet files into RAM. Uses **DuckDB** to mount a virtual SQL view over physical files.
+* **Zero-Copy:** Transfers query results to **Polars** using Apache Arrow, guaranteeing minimal latency even with millions of rows.
 
 ---
 
-## 🔧 Guía de Uso: `MarketLoader`
+## 🔧 Usage Guide: `MarketLoader`
 
-La clase `MarketLoader` es la interfaz única de acceso (Facade) al Data Lake.
+The `MarketLoader` class is the single access interface (Facade) to the Data Lake.
 
-### Inicialización
+### Initialization
 
 ```python
 from src.src_DD.loader import MarketLoader

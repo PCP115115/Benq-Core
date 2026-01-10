@@ -1,89 +1,95 @@
+***
+
+### `features_instructions.md`
+
+
 # ⚙️ Engine: Feature Engineering & Alpha Generation
 
-Este módulo constituye el núcleo de investigación cuantitativa del proyecto (**Alpha Engine**). Su objetivo es transformar series de precios OHLCV "sucias" y no estacionarias en una matriz de factores limpia, normalizada y neutralizada, lista para alimentar modelos de Machine Learning.
+This module constitutes the quantitative research core of the project (**Alpha Engine**). Its objective is to transform "dirty" and non-stationary OHLCV price series into a clean, normalized, and neutralized factor matrix, ready to feed Machine Learning models.
 
-Utiliza **Polars** para una ejecución vectorizada, perezosa (*Lazy*) y multihilo, permitiendo calcular cientos de indicadores sobre miles de activos en cuestión de segundos. El sistema cubre activos de **Norteamérica, Europa, Asia-Pacífico y Latam**.
+It uses **Polars** for vectorized, lazy, and multi-threaded execution, allowing hundreds of indicators to be calculated on thousands of assets in a matter of seconds. The system covers assets from **North America, Europe, Asia-Pacific, and Latam**.
 
 ---
 
-## 🧠 Filosofía de Diseño: El Sistema de 3 Capas
+## 🧠 Design Philosophy: The 3-Layer System
 
-Para maximizar la relación señal-ruido (*Signal-to-Noise Ratio*), los datos atraviesan tres etapas de refinamiento secuencial. El usuario puede extraer los datos en cualquiera de estas fases mediante el parámetro `layer`.
+To maximize the *Signal-to-Noise Ratio*, data goes through three stages of sequential refinement. The user can extract data at any of these phases using the `layer` parameter.
 
-### 1. Raw Layer (Capa Cruda)
-Cálculo puramente matemático de indicadores técnicos avanzados y métricas de microestructura de mercado.
-* **Fuente:** `src_features/indicators.py`
-* **Indicadores Clave:**
-    * **Momentum:** RSI (con *Wilder's Smoothing*), MACD.
-    * **Volatilidad (Estimadores Institucionales):** * *Yang-Zhang:* [NUEVO] El estimador más robusto. Captura saltos de apertura (*Overnight Gaps*) y es independiente de la tendencia (*Drift*).
-        * *Garman-Klass:* Volatilidad eficiente basada en OHLC.
-        * *Parkinson:* Volatilidad basada en rangos (High-Low).
-        * *Histórica:* Desviación estándar de retornos logarítmicos.
-    * **Estructura de Mercado:**
-        * *Volatility Cones:* [NUEVO] Precios teóricos de Techo y Suelo proyectados a futuro ($T+5$) basados en la volatilidad Yang-Zhang. Actúan como soportes y resistencias dinámicos.
-    * **Liquidez:** Ratio de Iliquidez de Amihud (Impacto del volumen en el precio).
-    * **Eficiencia:** Kaufman Efficiency Ratio (KER).
-* **Problema:** Estos valores tienen escalas incomparables (ej. RSI $\in [0,100]$, Amihud $\approx 10^{-6}$, Precio $\in [10, 1000]$).
+### 1. Raw Layer
+Purely mathematical calculation of advanced technical indicators and market microstructure metrics.
+* **Source:** `src_features/indicators.py`
+* **Key Indicators:**
+    * **Momentum:** RSI (with *Wilder's Smoothing*), MACD.
+    * **Volatility (Institutional Estimators):**
+        * *Yang-Zhang:* [NEW] The most robust estimator. Captures opening jumps (*Overnight Gaps*) and is independent of the trend (*Drift*).
+        * *Garman-Klass:* Efficient volatility based on OHLC.
+        * *Parkinson:* Range-based volatility (High-Low).
+        * *Historical:* Standard deviation of logarithmic returns.
+    * **Market Structure:**
+        * *Volatility Cones:* [NEW] Theoretical Ceiling and Floor prices projected into the future ($T+5$) based on Yang-Zhang volatility. Act as dynamic support and resistance.
+    * **Liquidity:** Amihud Illiquidity Ratio (Impact of volume on price).
+    * **Efficiency:** Kaufman Efficiency Ratio (KER).
+* **Problem:** These values have incomparable scales (e.g., RSI $\in [0,100]$, Amihud $\approx 10^{-6}$, Price $\in [10, 1000]$).
 
-### 2. Robust Layer (Normalización Temporal)
-Resuelve el problema de la **estacionariedad**. Cada indicador se normaliza respecto a su propia historia reciente (ventana deslizante) utilizando un escalado robusto a valores atípicos (*outliers*).
+### 2. Robust Layer (Temporal Normalization)
+Solves the **stationarity** problem. Each indicator is normalized relative to its own recent history (sliding window) using robust scaling to outliers.
 
 $$Z_{rob} = \frac{X_t - \text{Median}(X_{t-n...t})}{\text{IQR}(X_{t-n...t})}$$
 
-* **Lógica:** Compara el valor de hoy contra los últimos $N$ días (ej. 1 año bursátil).
-* **Resultado:** Una serie centrada en 0, donde valores $>2$ o $<-2$ representan anomalías estadísticas reales del activo.
-* **Sufijo:** `_rob` (ej. `vol_yz_20d_rob`).
+* **Logic:** Compares today's value against the last $N$ days (e.g., 1 trading year).
+* **Result:** A series centered at 0, where values $>2$ or $<-2$ represent real statistical anomalies of the asset.
+* **Suffix:** `_rob` (e.g., `vol_yz_20d_rob`).
 
-### 3. Neutral Layer (Neutralización Sectorial)
-Resuelve el problema de la **correlación de mercado (Beta)**. Aísla el rendimiento idiosincrático (Alpha) del activo eliminando la tendencia del sector en ese día específico.
+### 3. Neutral Layer (Sector Neutralization)
+Solves the **market correlation (Beta)** problem. Isolates the asset's idiosyncratic performance (Alpha) by removing the sector trend on that specific day.
 
-* **Lógica:** Agrupa todos los activos de un mismo sector en la fecha $T$, calcula la mediana del sector y reajusta el score del activo.
-* **Resultado:** Un valor que indica qué tan bueno es el activo *comparado con sus pares* hoy. Ideal para estrategias *Long/Short* y *Market Neutral*.
-* **Sufijo:** `_neutral` (ej. `vol_yz_20d_neutral`).
-
----
-
-## 🛠️ Configuración y Parámetros
-
-No es necesario editar el código fuente para ajustar los hiperparámetros. Todo el comportamiento se controla desde `config.py`.
-
-### Parámetros de Indicadores (`FEATURES_PARAMS`)
-
-| Parámetro | Valor Defecto | Descripción |
-| :--- | :--- | :--- |
-| **Volatilidad** | | |
-| `YANG_ZHANG_WINDOW` | **20** | [NUEVO] Ventana para el estimador Yang-Zhang (Drift+Gaps). |
-| `GARMAN_KLASS_WINDOW`| **20** | Ventana para volatilidad eficiente (OHLC). |
-| `PARKINSON_WINDOW` | **20** | Ventana para volatilidad de rango (High-Low). |
-| `VOLATILITY_WINDOW` | **20** | Ventana para volatilidad histórica (Close-Close). |
-| **Conos de Volatilidad** | | |
-| `YZ_Z_SCORE` | **1.96** | [NUEVO] Intervalo de confianza (95%) para los conos. |
-| `YZ_FORECAST_HORIZON` | **5** | [NUEVO] Días de proyección para el cálculo de Techo/Suelo. |
-| **Momentum/Otros** | | |
-| `RSI_PERIOD` | **14** | Periodo para el oscilador RSI (Wilder). |
-| `AMIHUD_WINDOW` | **20** | Ventana suavizado para ratio de iliquidez. |
-| `AMIHUD_SCALING` | **1e6** | Factor multiplicador para hacer legible el ratio Amihud. |
-| `SKEW_WINDOW` | **60** | Ventana para calcular asimetría (Skewness) trimestral. |
-| `CORR_WINDOW` | **20** | Ventana para correlación Precio-Volumen. |
-| `KER_WINDOW` | **10** | Ventana para Eficiencia de Kaufman. |
-
-### Parámetros de Normalización (`NORMALIZATION_PARAMS`)
-
-| Parámetro | Valor Defecto | Descripción |
-| :--- | :--- | :--- |
-| `ROLLING_WINDOW` | **252** | Historia para calcular Z-Score (1 año bursátil). |
-| `MIN_PERIODS` | **120** | Mínimo de datos requeridos al inicio para evitar ruido. |
-| `MIN_ASSETS_PER_SECTOR`| **5** | Mínimo de activos para aplicar neutralización sectorial. |
+* **Logic:** Groups all assets of the same sector on date $T$, calculates the sector median, and readjusts the asset score.
+* **Result:** A value indicating how good the asset is *compared to its peers* today. Ideal for *Long/Short* and *Market Neutral* strategies.
+* **Suffix:** `_neutral` (e.g., `vol_yz_20d_neutral`).
 
 ---
 
-## 🚀 API de Uso: `master_features.py`
+## 🛠️ Configuration and Parameters
 
-La función `get_feature_matrix` es el punto de entrada único (*Single Entry Point*). 
+It is not necessary to edit the source code to adjust hyperparameters. All behavior is controlled from `config.py`.
 
-Cuenta con un sistema de **"Auto-Healing"**: si los datos procesados no existen o están corruptos, invoca automáticamente al pipeline de cálculo (`pipeline_features.py`) para regenerarlos antes de devolver el resultado.
+### Indicator Parameters (`FEATURES_PARAMS`)
 
-### Firma de la Función
+| Parameter | Default Value | Description |
+| :--- | :--- | :--- |
+| **Volatility** | | |
+| `YANG_ZHANG_WINDOW` | **20** | [NEW] Window for Yang-Zhang estimator (Drift+Gaps). |
+| `GARMAN_KLASS_WINDOW`| **20** | Window for efficient volatility (OHLC). |
+| `PARKINSON_WINDOW` | **20** | Window for range volatility (High-Low). |
+| `VOLATILITY_WINDOW` | **20** | Window for historical volatility (Close-Close). |
+| **Volatility Cones** | | |
+| `YZ_Z_SCORE` | **1.96** | [NEW] Confidence interval (95%) for cones. |
+| `YZ_FORECAST_HORIZON` | **5** | [NEW] Projection days for Ceiling/Floor calculation. |
+| **Momentum/Others** | | |
+| `RSI_PERIOD` | **14** | Period for RSI oscillator (Wilder). |
+| `AMIHUD_WINDOW` | **20** | Smoothing window for illiquidity ratio. |
+| `AMIHUD_SCALING` | **1e6** | Multiplier factor to make Amihud ratio readable. |
+| `SKEW_WINDOW` | **60** | Window to calculate quarterly Skewness. |
+| `CORR_WINDOW` | **20** | Window for Price-Volume correlation. |
+| `KER_WINDOW` | **10** | Window for Kaufman Efficiency. |
+
+### Normalization Parameters (`NORMALIZATION_PARAMS`)
+
+| Parameter | Default Value | Description |
+| :--- | :--- | :--- |
+| `ROLLING_WINDOW` | **252** | History to calculate Z-Score (1 trading year). |
+| `MIN_PERIODS` | **120** | Minimum data required at start to avoid noise. |
+| `MIN_ASSETS_PER_SECTOR`| **5** | Minimum assets to apply sector neutralization. |
+
+---
+
+## 🚀 Usage API: `master_features.py`
+
+The function `get_feature_matrix` is the single entry point.
+
+It features an **"Auto-Healing"** system: if processed data does not exist or is corrupt, it automatically invokes the calculation pipeline (`pipeline_features.py`) to regenerate it before returning the result.
+
+### Function Signature
 
 ```python
 def get_feature_matrix(
