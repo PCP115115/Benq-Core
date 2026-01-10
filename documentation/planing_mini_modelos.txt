@@ -1,0 +1,87 @@
+1. Resumen del Flujo de Trabajo: Mini-Modelo Trend
+Este esquema define la "Hoja de Ruta" de desarrollo sin escribir una sola línea de lógica aún.
+
+A. Arquitectura de Carpetas
+Dentro de src/engine/, crearemos la siguiente estructura modular:
+
+mini_models/ (Directorio Raíz)
+
+src_mini_models/ (Código fuente)
+
+trend_model.py: Script específico para la lógica del modelo de tendencia.
+
+safety_mini_models.py: Funciones de auditoría (input check, model integrity check).
+
+master_mini_models.py: Orquestador que lanza los procesos en paralelo.
+
+test_mini_models/ (Tests unitarios)
+
+test_trend.py: Pruebas de integración.
+
+B. Gestión de Configuración (config.py)
+No hardcodearemos nada. En src/engine/config.py añadiremos un diccionario MINI_MODEL_PARAMS que centralice:
+
+Features: Lista de strings con los nombres de las variables (MACD, ADX, etc.).
+
+Hiperparámetros: Configuración del LightGBM (learning rate, leaves, etc.).
+
+Target: Horizonte temporal (asociado a YZ_FORECAST_HORIZON).
+
+C. Flujo de Datos (Data Pipeline)
+Ingesta: El script trend_model.py llamará a master_features.get_feature_matrix.
+
+Filtro: Layer = "Robust" (Normalizado temporalmente).
+
+Variables: Solo las definidas en config.py (evitando ruido de otros tipos).
+
+Etiquetado (Labeling):
+
+Usaremos los Conos de Volatilidad Yang-Zhang (fprice_ceil_yz, fprice_floor_yz) ya generados en el pipeline de features.
+
+Método: Triple Barrier (¿Toca techo primero? ¿Toca suelo primero? ¿O se queda en medio?).
+
+Entrenamiento: LightGBM procesa los datos y genera un archivo .joblib.
+
+D. Indicadores Seleccionados (Trend)
+Fuerza: adx_14 (Pendiente de implementar en indicators.py).
+
+Dirección: macd_line, macd_hist.
+
+Posición Relativa: rel_sma_15, rel_sma_50.
+
+Calidad: ker_10 (Eficiencia).
+
+Confirmación: corr_price_vol_20d.
+
+2. Definición de Indicadores: Volatilidad y Reversión
+Ahora, planifiquemos los inputs "estancos" para los otros dos modelos. El objetivo es que cada modelo vea el mercado desde una óptica diferente, maximizando la diversidad del Meta-Modelo final.
+
+A. Mini-Modelo de Volatilidad
+Objetivo: Predecir si la volatilidad futura se expandirá (romper rangos) o se contraerá (rango lateral), independientemente de la dirección.
+
+Indicadores Propuestos:
+
+Estimador Yang-Zhang (vol_yz_20d): Tu indicador estrella. Captura gaps y saltos overnight.
+
+Estimador Garman-Klass (vol_gk_20d): Visión basada en OHLC, útil para contrastar con YZ.
+
+Estimador Parkinson (vol_parkinson_20d): Basado solo en rangos High-Low (intradía puro).
+
+Volatilidad de Volumen (vol_std_20d): La inestabilidad en el volumen suele preceder a la inestabilidad en el precio.
+
+Amihud (amihud_20d): La iliquidez (alto impacto del volumen en precio) es un proxy de fragilidad y volatilidad explosiva.
+
+Nota: Al darle distintos estimadores matemáticos (YZ, GK, Parkinson), el modelo aprenderá las discrepancias entre ellos.
+
+B. Mini-Modelo de Reversión
+Objetivo: Detectar condiciones de sobre-extensión donde es probable un retorno a la media (rebote).
+
+Indicadores Propuestos:
+
+RSI (rsi_14): El clásico oscilador de momentum. Fundamental.
+
+Skewness (skew_60d): Asimetría de retornos. Una skew muy negativa indica "Crash Risk" o pánico excesivo (posible rebote), una skew muy positiva indica euforia.
+
+Distancia a la Media (rel_sma_15): Mide cuánto se ha alejado el precio de su promedio rápido. Si el valor es extremo (ej. +10% o -10%), la probabilidad de reversión aumenta ("Rubber band effect").
+
+MACD Histogram (macd_hist): Específicamente el histograma (la diferencia entre líneas). Cuando el histograma empieza a decrecer en extremos, suele marcar el inicio de la reversión.

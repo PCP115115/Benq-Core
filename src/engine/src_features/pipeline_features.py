@@ -136,6 +136,7 @@ def run_pipeline():
         indicators.get_relative_sma("Close", p["SMA_MEDIUM"]),
         indicators.get_relative_sma("Close", p["SMA_SLOW"]),
         indicators.get_efficiency_ratio_ker("Close", p["KER_WINDOW"]),
+        *indicators.get_adx("High", "Low", "Close", period=14),
         
         # --- OSCILADORES ---
         indicators.get_rsi("Close", p["RSI_PERIOD"]),

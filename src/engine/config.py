@@ -89,3 +89,55 @@ PATHS = {
     "MODEL_LSTM": "data/models/context_lstm.pth",
     "MODEL_GMM": "data/models/context_gmm.joblib"
 }
+
+# --- PARÁMETROS DE MINI-MODELOS (MIXTURE OF EXPERTS) ---
+MINI_MODEL_PARAMS = {
+    "FORECAST_HORIZON": 5,  # Debe coincidir con YZ_FORECAST_HORIZON
+    
+    # Hiperparámetros base para LightGBM
+    "LGBM_PARAMS": {
+        "objective": "binary",
+        "metric": "auc",
+        "boosting_type": "gbdt",
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "feature_fraction": 0.9,
+        "bagging_fraction": 0.8,
+        "bagging_freq": 5,
+        "verbosity": -1,
+        "n_estimators": 100,
+        "random_state": 42,
+        "n_jobs": 1  # 1 hilo por modelo, ya que paralelizamos a nivel de proceso
+    },
+    
+    # Definición de Features por Experto (Nombres base, sin sufijo _rob)
+    "FEATURES_TREND": [
+        "adx_14", 
+        "macd_line", 
+        "macd_hist", 
+        "rel_sma_15", 
+        "rel_sma_50", 
+        "ker_10", 
+        "corr_price_vol_20d"
+    ],
+    
+    "FEATURES_VOLATILITY": [
+        "vol_yz_20d", 
+        "vol_gk_20d", 
+        "vol_parkinson_20d", 
+        "vol_std_20d", 
+        "amihud_20d"
+    ],
+    
+    "FEATURES_REVERSION": [
+        "rsi_14", 
+        "skew_60d", 
+        "rel_sma_15", 
+        "macd_hist"
+    ]
+}
+
+# --- ACTUALIZACIÓN DE RUTAS ---
+PATHS.update({
+    "MINI_MODELS_DIR": "data/models/mini_models/"
+})
