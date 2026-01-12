@@ -46,16 +46,11 @@ NORMALIZATION_PARAMS = {
     "MIN_ASSETS_PER_SECTOR": 5
 }
 
-# --- RUTAS DEL PROYECTO (NUEVO) ---
-# Define dónde se guardarán los outputs. 
-# La ruta es relativa al root del proyecto.
-PATHS = {
-    "FEATURES_OUTPUT": "data/processed/features_matrix.parquet"
-}
 
 
 
 # --- PARÁMETROS DE INTELIGENCIA DEL MÓDULO DE RÉGIMEN DE MERCADO (CONTEXT) ---
+
 CONTEXT_PARAMS = {
     # Features de entrada para el Autoencoder (Deben existir en indicators.py)
     # Seleccionamos: Volatilidad, Eficiencia, Liquidez y Correlación
@@ -83,9 +78,73 @@ CONTEXT_PARAMS = {
 
 # --- RUTAS ACTUALIZADAS ---
 PATHS = {
-    "FEATURES_OUTPUT": "data/processed/features_matrix.parquet",
+    "FEATURES_OUTPUT": "src/data/processed/features_matrix.parquet",
     
     # Modelos entrenados
-    "MODEL_LSTM": "data/models/context_lstm.pth",
-    "MODEL_GMM": "data/models/context_gmm.joblib"
+    "MODEL_LSTM": "src/data/models/context_lstm.pth",
+    "MODEL_GMM": "src/data/models/context_gmm.joblib"
 }
+
+
+
+
+
+# --- PARÁMETROS DE MINI-MODELOS (MIXTURE OF EXPERTS) ---
+
+MINI_MODEL_PARAMS = {
+    "FORECAST_HORIZON": 5,  # Debe coincidir con YZ_FORECAST_HORIZON
+    
+    # Hiperparámetros base para LightGBM
+    "LGBM_PARAMS": {
+        "objective": "binary",
+        "metric": "auc",
+        "boosting_type": "gbdt",
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "feature_fraction": 0.9,
+        "bagging_fraction": 0.8,
+        "bagging_freq": 5,
+        "verbosity": -1,
+        "n_estimators": 100,
+        "random_state": 42,
+        "n_jobs": 1  # 1 hilo por modelo, ya que paralelizamos a nivel de proceso
+    },
+
+    "MINI_MODEL_TRAIN_PARAMS": {
+        "TRAIN_TEST_SPLIT_RATIO": 0.80,  # El porcentaje de corte (0.8 = 80%)
+        "TEST_MODE": True,               # True = Hace Split (Backtest), False = Entrena con TODO (Producción)
+        "PURGE_OVERLAP": True            # True = Aplica el Purged Gap (recomendado), False = Split simple
+    },
+    
+    # Definición de Features por Experto (Nombres base, sin sufijo _rob)
+    "FEATURES_TREND": [
+        "adx_14", 
+        "macd_line", 
+        "macd_hist", 
+        "rel_sma_15", 
+        "rel_sma_50", 
+        "ker_10", 
+        "corr_price_vol_20d"
+    ],
+    
+    "FEATURES_VOLATILITY": [
+        "vol_yz_20d", 
+        "vol_gk_20d", 
+        "vol_parkinson_20d", 
+        "vol_std_20d", 
+        "amihud_20d"
+    ],
+    
+    "FEATURES_REVERSION": [
+        "rsi_14", 
+        "skew_60d", 
+        "rel_sma_15", 
+        "macd_hist"
+    ],
+    "LAYER" : ["all"]
+}
+
+# --- ACTUALIZACIÓN DE RUTAS ---
+PATHS.update({
+    "MINI_MODELS_DIR": "src/data/models/mini_models/"
+})

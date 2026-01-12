@@ -1,5 +1,5 @@
 # ===============================================
-# 🐍 PYTHON CORE
+# 🐍 PYTHON CORE & SYSTEM
 # ===============================================
 __pycache__/
 *.py[cod]
@@ -24,9 +24,8 @@ wheels/
 MANIFEST
 
 # ===============================================
-# 🔒 ENTORNOS VIRTUALES Y SECRETOS (CRÍTICO)
+# 🔒 SECRETOS Y ENTORNOS (¡CRÍTICO!)
 # ===============================================
-# Protege tus claves API y evita subir librerías
 .env
 .envrc
 .venv
@@ -35,42 +34,59 @@ venv/
 ENV/
 
 # ===============================================
-# 📊 BEN QUANT CORE - DATOS (CRÍTICO)
+# 📊 BEN QUANT CORE - DATOS Y ARTEFACTOS
 # ===============================================
-# Bloqueamos las carpetas de datos masivos del pipeline
-data/raw/
-data/clean/
-data/quarantine/
+# 1. Ignoramos la carpeta de datos principal RECURSIVAMENTE
+# Esto protege: raw, clean, processed, quarantine, models, etc.
+src/data/
+data/
 
-# Bloqueo de seguridad por extensión (por si sacas archivos fuera)
+# 2. Ignoramos carpetas de salida de tests y temporales
+src/models_output_test/
+test_output_temp/
+
+# 3. Red de seguridad: Bloqueo por extensión (por si mueves archivos fuera)
 *.parquet
 *.csv
 *.xlsx
+*.xls
 *.duckdb
 *.db
+*.sqlite
+*.json
+*.xml
+
+# ===============================================
+# 🤖 MODELOS DE IA (OUTPUTS)
+# ===============================================
+# Nunca subimos binarios pesados a GitHub
+*.joblib
+*.pkl
+*.pickle
+*.pth
+*.h5
+*.onnx
+__joblib_cache__/
 
 # ===============================================
 # 📝 LOGS Y DEBUGGING
 # ===============================================
-# Ignora los registros de ejecución de safety.py y download.py
 logs/
+src/logs/
 *.log
 pip-log.txt
 .ipynb_checkpoints
+.coverage
+htmlcov/
 
 # ===============================================
-# 💻 IDEs Y EDITORES
+# 💻 IDEs Y SISTEMA OPERATIVO
 # ===============================================
-# Configuraciones locales que no deben compartirse
 .vscode/
 .idea/
 .spyderproject
 .spyproject
 .cursorignore
 .cursorindexingignore
-
-# ===============================================
-# 🖥️ SISTEMA OPERATIVO
-# ===============================================
 .DS_Store
 Thumbs.db

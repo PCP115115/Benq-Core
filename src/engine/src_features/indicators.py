@@ -218,3 +218,39 @@ def get_macd_expressions(col_name: str, fast: int, slow: int, signal: int) -> li
     macd_hist = (macd_line - macd_signal).alias("macd_hist")
     
     return [macd_line, macd_signal, macd_hist]
+
+def get_adx(col_high: str, col_low: str, col_close: str, period: int = 14) -> list[pl.Expr]:
+    """
+    Average Directional Index (ADX) con suavizado de Wilder.
+    Devuelve [adx, plus_di, minus_di].
+    """
+    # 1. True Range (TR)
+    # TR = Max(H-L, Abs(H-Cp), Abs(L-Cp))
+    tr1 = pl.col(col_high) - pl.col(col_low)
+    tr2 = (pl.col(col_high) - pl.col(col_close).shift(1)).abs()
+    tr3 = (pl.col(col_low) - pl.col(col_close).shift(1)).abs()
+    tr = pl.max_horizontal(tr1, tr2, tr3)
+
+    # 2. Directional Movement (DM)
+    up_move = pl.col(col_high) - pl.col(col_high).shift(1)
+    down_move = pl.col(col_low).shift(1) - pl.col(col_low)
+
+    plus_dm = pl.when((up_move > down_move) & (up_move > 0)).then(up_move).otherwise(0)
+    minus_dm = pl.when((down_move > up_move) & (down_move > 0)).then(down_move).otherwise(0)
+
+    # 3. Suavizado de Wilder (alpha = 1/n  => com = n - 1)
+    wilder_com = period - 1
+    
+    tr_smooth = tr.ewm_mean(com=wilder_com, adjust=False, min_samples=period)
+    plus_dm_smooth = plus_dm.ewm_mean(com=wilder_com, adjust=False, min_samples=period)
+    minus_dm_smooth = minus_dm.ewm_mean(com=wilder_com, adjust=False, min_samples=period)
+
+    # 4. Directional Indicators (DI)
+    plus_di = (100 * plus_dm_smooth / tr_smooth).alias(f"plus_di_{period}")
+    minus_di = (100 * minus_dm_smooth / tr_smooth).alias(f"minus_di_{period}")
+
+    # 5. DX y ADX
+    dx = (100 * (plus_di - minus_di).abs() / (plus_di + minus_di).abs())
+    adx = dx.ewm_mean(com=wilder_com, adjust=False, min_samples=period).alias(f"adx_{period}")
+
+    return [adx, plus_di, minus_di]
