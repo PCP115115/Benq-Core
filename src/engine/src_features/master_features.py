@@ -6,23 +6,31 @@ from typing import List, Optional, Union
 from datetime import datetime
 
 # --- SETUP DE RUTAS ---
-# Calculamos rutas relativas robustas para mantener la modularidad del sistema
 current_dir = os.path.dirname(os.path.abspath(__file__))  # src/engine/src_features
 engine_dir = os.path.dirname(current_dir)                 # src/engine
 src_dir = os.path.dirname(engine_dir)                     # src
 project_root = os.path.dirname(src_dir)                   # Root del proyecto
 
-# Añadimos al path para importar config y módulos hermanos
-sys.path.append(src_dir)
-sys.path.append(engine_dir)
+# --- CORRECCIÓN DE IMPORTS (LO ÚNICO QUE CAMBIA) ---
+# Añadimos la raíz al path si no está, para que Python encuentre 'src'
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 try:
-    import pipeline_features
-    import config
-except ImportError as e:
-    print(f"❌ Error crítico de importación en Master: {e}")
-    sys.exit(1)
-
+    # 1. Intentamos Import Absoluto (Correcto para tests y ejecución desde raíz)
+    import src.engine.config as config
+    import src.engine.src_features.pipeline_features as pipeline_features
+except ImportError:
+    # 2. Fallback: Import Local (Correcto para ejecución directa del script)
+    sys.path.append(engine_dir)
+    sys.path.append(current_dir)
+    try:
+        import config
+        import pipeline_features
+    except ImportError as e:
+        print(f"❌ Error crítico de importación en Master: {e}")
+        sys.exit(1)
+# ---------------------------------------------------
 # --- LOGGING ---
 logging.basicConfig(
     level=logging.INFO,

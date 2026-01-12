@@ -5,23 +5,39 @@ import logging
 import time
 
 # --- CONFIGURACIÓN DE RUTAS E IMPORTACIONES ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# Calculamos la raíz del proyecto para importaciones absolutas
+current_dir = os.path.dirname(os.path.abspath(__file__))  # src/engine/src_features
 engine_dir = os.path.dirname(os.path.dirname(current_dir)) # src/engine
 src_dir = os.path.dirname(engine_dir)                     # src
-project_root = os.path.dirname(src_dir)                   # Root
+project_root = os.path.dirname(src_dir)                   # Raíz (Benq-Core)
 
-# Añadimos rutas al path
-sys.path.append(src_dir) 
-sys.path.append(engine_dir)
-sys.path.append(current_dir)
+# Añadimos la raíz al path si no está
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 try:
-    from src_DD.loader import MarketLoader
-    import config
-    import indicators
-except ImportError as e:
-    print(f"❌ Error de importación: {e}")
-    sys.exit(1)
+    # 1. Imports Absolutos (Estándar recomendado)
+    # Estos funcionan siempre que project_root esté en el path
+    import src.engine.config as config
+    import src.engine.src_features.indicators as indicators
+    from src.src_DD.loader import MarketLoader
+    
+except ImportError:
+    # 2. Fallback: Configuración legacy de paths
+    # Si fallan los absolutos, añadimos rutas específicas e intentamos relativos
+    sys.path.append(engine_dir) # Para encontrar 'config'
+    sys.path.append(src_dir)    # Para encontrar 'src_DD'
+    
+    try:
+        import config
+        import indicators
+        from src_DD.loader import MarketLoader
+    except ImportError as e:
+        print(f"❌ Error CRÍTICO de importación en Pipeline Features: {e}")
+        # Debug: Mostrar rutas para diagnosticar
+        print(f"Rutas en sys.path: {sys.path}")
+        sys.exit(1)
+
 
 # --- LOGGING ---
 logging.basicConfig(

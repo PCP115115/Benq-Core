@@ -16,14 +16,35 @@ project_root = os.path.dirname(src_dir)
 sys.path.append(src_dir)
 sys.path.append(engine_dir)
 
+# ... (Después de sys.path.append(engine_dir))
+
 try:
-    import config
-    from src_features import master_features
-    from auto_encoder_lstm import LSTMHandler
-    from gmm_model import RegimeDetector
-except ImportError as e:
-    print(f"❌ Error de importación en Context: {e}")
-    sys.exit(1)
+    # USAMOS IMPORTS ABSOLUTOS (Robustez Profesional)
+    # Esto funciona tanto si lanzas el script solo como si lo importas desde otro lado
+    
+    # 1. Configuración (src/engine/config.py)
+    import src.engine.config as config
+    
+    # 2. Features (src/engine/src_features/master_features.py)
+    from src.engine.src_features import master_features
+    
+    # 3. Modelos Locales (src/engine/context/...)
+    from src.engine.context.auto_encoder_lstm import LSTMHandler
+    from src.engine.context.gmm_model import RegimeDetector
+
+except ImportError:
+    # Fallback: Si por alguna razón se ejecuta el script aislado sin la raíz en path
+    # intentamos imports relativos "antiguos"
+    try:
+        import config
+        from src_features import master_features
+        from auto_encoder_lstm import LSTMHandler
+        from gmm_model import RegimeDetector
+    except ImportError as e:
+        print(f"❌ Error CRÍTICO de importación en Context: {e}")
+        # Tip de debug para el usuario
+        print(f"Rutas en sys.path: {sys.path}") 
+        sys.exit(1)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [CONTEXT] - %(levelname)s - %(message)s')
 logger = logging.getLogger("MarketContext")

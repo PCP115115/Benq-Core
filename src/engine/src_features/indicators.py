@@ -26,11 +26,16 @@ def get_rolling_volatility(col_returns: str, window: int) -> pl.Expr:
 
 def get_volume_std(col_vol: str, window: int) -> pl.Expr:
     """
-    Desviación típica rodante del volumen.
+    Desviación típica rodante del volumen NORMALIZADA (Coeficiente de Variación).
+    Formula: Rolling_Std / Rolling_Mean
+    Mantiene el mismo alias para compatibilidad.
     """
+    roll_std = pl.col(col_vol).rolling_std(window_size=window)
+    roll_mean = pl.col(col_vol).rolling_mean(window_size=window)
+    
     return (
-        pl.col(col_vol)
-        .rolling_std(window_size=window)
+        (roll_std / roll_mean)
+        .fill_nan(0.0)
         .alias(f"vol_std_{window}d")
     )
 
@@ -170,15 +175,20 @@ def get_volatility_bounds(col_close: str, col_vol_yz: str, z_score: float, horiz
 
 def get_amihud_liquidity(col_abs_ret: str, col_price: str, col_vol: str, window: int, scaling_factor: float = 1e6) -> pl.Expr:
     """
-    Iliquidez de Amihud (Proxy de Impacto en Mercado).
-    Se mantiene sin cambios.
+    Iliquidez de Amihud con transformación LOGARÍTMICA.
+    Ayuda a comprimir los outliers extremos y mejora la estacionariedad.
     """
+    # Cálculo original
     daily_illiquidity = (
         pl.col(col_abs_ret) / (pl.col(col_price) * pl.col(col_vol))
     )
     
+    # Promedio rodante
+    rolling_amihud = daily_illiquidity.rolling_mean(window_size=window) * scaling_factor
+    
     return (
-        (daily_illiquidity.rolling_mean(window_size=window) * scaling_factor)
+        rolling_amihud
+        .log1p() 
         .alias(f"amihud_{window}d")
     )
 
@@ -208,13 +218,19 @@ def get_rsi(col_name: str, period: int) -> pl.Expr:
 
 def get_macd_expressions(col_name: str, fast: int, slow: int, signal: int) -> list[pl.Expr]:
     """
-    Devuelve TRES expresiones para generar las columnas del MACD.
+    Versión NORMALIZADA (PPO - Percentage Price Oscillator).
+    Calcula la diferencia como porcentaje de la EMA lenta.
     """
     ema_fast = pl.col(col_name).ewm_mean(span=fast, adjust=False)
     ema_slow = pl.col(col_name).ewm_mean(span=slow, adjust=False)
     
-    macd_line = (ema_fast - ema_slow).alias("macd_line")
+    # CAMBIO CLAVE: ((Fast - Slow) / Slow) * 100
+    macd_line = (((ema_fast - ema_slow) / ema_slow) * 100).alias("macd_line")
+    
+    # La señal se calcula sobre la línea ya normalizada
     macd_signal = macd_line.ewm_mean(span=signal, adjust=False).alias("macd_signal")
+    
+    # El histograma mantiene la escala porcentual
     macd_hist = (macd_line - macd_signal).alias("macd_hist")
     
     return [macd_line, macd_signal, macd_hist]

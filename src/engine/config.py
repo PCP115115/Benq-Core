@@ -1,6 +1,18 @@
 # src/engine/config.py
 
-# --- PARÁMETROS DE INDICADORES ---
+
+#============================================
+#PARÁMETROS GENERALES DEL MOTOR
+#============================================
+ticker_analizado = "AAPL"
+tiempo_analisis = 5
+start_date = "2010-01-01"
+end_date = "2023-12-31"
+layer = "neutral"  # Capas: "all", "robust", "neutral"
+
+#============================================
+# --- PARÁMETROS DE INDICADORES (features) ---
+#============================================
 FEATURES_PARAMS = {
     # Ventanas Temporales Básicas
     "RSI_PERIOD": 14,             # Estándar de Wilder
@@ -16,7 +28,7 @@ FEATURES_PARAMS = {
     
     # [NUEVO] Conos de Volatilidad (Forecast Bounds)
     "YZ_Z_SCORE": 1.96,           # Intervalo de confianza 95%
-    "YZ_FORECAST_HORIZON": 5,     # Proyección a 5 días (semana bursátil)
+    "YZ_FORECAST_HORIZON": tiempo_analisis,     # Proyección a 5 días (semana bursátil)
 
     # Liquidez
     "AMIHUD_WINDOW": 20,          # Ventana de media móvil para iliquidez
@@ -49,8 +61,12 @@ NORMALIZATION_PARAMS = {
 
 
 
-# --- PARÁMETROS DE INTELIGENCIA DEL MÓDULO DE RÉGIMEN DE MERCADO (CONTEXT) ---
 
+
+
+#==============================================================================
+# --- PARÁMETROS DE INTELIGENCIA DEL MÓDULO DE RÉGIMEN DE MERCADO (CONTEXT) ---
+#==============================================================================
 CONTEXT_PARAMS = {
     # Features de entrada para el Autoencoder (Deben existir en indicators.py)
     # Seleccionamos: Volatilidad, Eficiencia, Liquidez y Correlación
@@ -89,10 +105,17 @@ PATHS = {
 
 
 
-# --- PARÁMETROS DE MINI-MODELOS (MIXTURE OF EXPERTS) ---
 
+
+
+
+
+
+#==============================================================================
+# --- PARÁMETROS DE MINI-MODELOS (MIXTURE OF EXPERTS) ---
+#==============================================================================
 MINI_MODEL_PARAMS = {
-    "FORECAST_HORIZON": 5,  # Debe coincidir con YZ_FORECAST_HORIZON
+    "FORECAST_HORIZON": tiempo_analisis,  # Debe coincidir con YZ_FORECAST_HORIZON
     
     # Hiperparámetros base para LightGBM
     "LGBM_PARAMS": {
@@ -141,10 +164,76 @@ MINI_MODEL_PARAMS = {
         "rel_sma_15", 
         "macd_hist"
     ],
-    "LAYER" : ["all"]
+    "LAYER" : ["all", "robust", "neutral"]
 }
 
 # --- ACTUALIZACIÓN DE RUTAS ---
 PATHS.update({
     "MINI_MODELS_DIR": "src/data/models/mini_models/"
 })
+
+
+
+
+
+#============================================
+# ---PARÁMETROS META-MODELO---
+#============================================
+META_MODEL_PARAMS = {
+
+    "start_date": start_date,
+    "end_date": end_date,
+    "feature_list": ["ker_10", "vol_yz_20d", "amihud_20d", "rsi_14", "macd_line"],
+    "normalization_window": 252,  # 1 año bursátil
+
+    "FORECAST_HORIZON": tiempo_analisis,  # Debe coincidir con YZ_FORECAST_HORIZON
+    
+    "XGB_PARAMS": {
+        # --- Configuración del Objetivo ---
+        "objective": "binary:logistic", # Salida de probabilidad 0-1 (Se asume un modelo por barrera)
+        "eval_metric": "auc",           # Misma métrica que el LightGBM
+        "booster": "gbtree",
+        "n_jobs": 1,                    # Paralelización externa (como indicaste)
+        "random_state": 42,
+        
+        # --- Control de Sobreajuste (El núcleo de la robustez) ---
+        # A diferencia de LightGBM (num_leaves=31), en XGBoost limitamos la profundidad.
+        "max_depth": 4,                 
+        
+        # min_child_weight es CRÍTICO. En LightGBM el default es 20.
+        # Aquí forzamos 25: Necesita mucha "evidencia" (muestras) para crear una hoja nueva.
+        "min_child_weight": 25,         
+        
+        # --- Velocidad de Aprendizaje vs Cantidad de Árboles ---
+        # Bajamos el learning_rate respecto a tu ejemplo (0.05 -> 0.02) y subimos los estimadores.
+        # Esto hace que el modelo aprenda patrones más generales y suaves.
+        "learning_rate": 0.02,
+        "n_estimators": 500,            # Más árboles para compensar el learning rate bajo (usar early stopping).
+        
+        # --- Gestión de los Expertos (MoE) y Regímenes ---
+        # colsample_bytree=0.6 obliga al árbol a mirar solo el 60% de los expertos cada vez.
+        # Esto evita que el modelo dependa siempre del mismo "Super Experto" que podría fallar en el futuro.
+        "colsample_bytree": 0.6,
+        
+        # subsample=0.7 entrena cada árbol con el 70% de los datos (bagging).
+        "subsample": 0.7,
+        
+        # --- Regularización (Castigo a la complejidad) ---
+        # LightGBM usa l1/l2 por defecto en 0. Aquí los forzamos.
+        # reg_alpha (L1): Pone a CERO el peso de expertos inútiles (selección de features).
+        "reg_alpha": 1.5,
+        # reg_lambda (L2): Suaviza los pesos para evitar que una predicción se dispare a 1.0 o 0.0 fácilmente.
+        "reg_lambda": 5.0,
+        
+        # --- Parámetro de "Poda" ---
+        # gamma: Mínima reducción de pérdida para hacer una división. 
+        # Un valor > 0 hace al algoritmo conservador.
+        "gamma": 0.2
+    },
+
+    "META_MODEL_TRAIN_PARAMS": {
+        "TRAIN_TEST_SPLIT_RATIO": 0.80,
+        "TEST_MODE": True,
+        "PURGE_OVERLAP": True 
+    }
+}
