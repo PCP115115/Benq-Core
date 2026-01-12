@@ -1,7 +1,6 @@
 # Mini-Models Module: Mixture of Experts (MoE) Architecture
 
 **Version:** 1.0.0  
-**Status:** Production Ready  
 **Module Path:** `src/engine/mini_models/`  
 **Author:** Pedro (Lead Architect)
 
