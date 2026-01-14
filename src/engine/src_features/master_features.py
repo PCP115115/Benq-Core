@@ -163,14 +163,26 @@ def get_feature_matrix(
             exprs_norm = []
             for col in target_cols:
                 roll_med = pl.col(col).rolling_median(normalization_window)
-                roll_q75 = pl.col(col).rolling_quantile(0.75, window_size=normalization_window)
-                roll_q25 = pl.col(col).rolling_quantile(0.25, window_size=normalization_window)
+                
+                # --- CAMBIO AQUÍ: Añadimos interpolation='linear' ---
+                roll_q75 = pl.col(col).rolling_quantile(
+                    0.75, 
+                    window_size=normalization_window, 
+                    interpolation='linear'  # <--- CRÍTICO PARA COINCIDIR CON NUMPY/PANDAS
+                )
+                roll_q25 = pl.col(col).rolling_quantile(
+                    0.25, 
+                    window_size=normalization_window, 
+                    interpolation='linear'  # <--- CRÍTICO
+                )
+                # ----------------------------------------------------
+
                 iqr = (roll_q75 - roll_q25).replace(0, None) # Evitar div/0 (NULL si IQR es 0)
                 
                 # Sobrescribimos la columna con su versión normalizada y rellenamos nulos con 0
                 expr = ((pl.col(col) - roll_med) / iqr).fill_null(0).alias(col)
                 exprs_norm.append(expr)
-            
+                
             q = q.with_columns([e.over("ticker") for e in exprs_norm])
             
             # 4. Limpieza de NaNs iniciales (periodo de calentamiento)
@@ -265,17 +277,3 @@ def get_feature_matrix(
         logger.error(f"❌ Error leyendo datos: {e}")
         return pl.DataFrame()
 
-if __name__ == "__main__":
-    print("\n--- TEST MODO INTERACTIVO MASTER ---")
-    # Bloque de prueba manual
-    # try:
-    #     df = get_feature_matrix(
-    #         tickers=["AAPL", "MSFT"], 
-    #         layer="raw", 
-    #         normalization_window=63,
-    #         features=["rsi", "volatility"]
-    #     )
-    #     print(df.head())
-    #     print("Columnas:", df.columns)
-    # except Exception as e:
-    #     print(e)

@@ -1,10 +1,9 @@
 import polars as pl
 import numpy as np
 
-# Constantes matemáticas
+# Constantes 
 LOG_2 = np.log(2)
 PARKINSON_CONST = 1.0 / (4.0 * LOG_2)
-# Constante para Garman-Klass: (2 * ln(2) - 1)
 GK_CONST = (2.0 * LOG_2) - 1.0
 
 def get_log_returns(col_name: str = "Close") -> pl.Expr:
@@ -27,8 +26,6 @@ def get_rolling_volatility(col_returns: str, window: int) -> pl.Expr:
 def get_volume_std(col_vol: str, window: int) -> pl.Expr:
     """
     Desviación típica rodante del volumen NORMALIZADA (Coeficiente de Variación).
-    Formula: Rolling_Std / Rolling_Mean
-    Mantiene el mismo alias para compatibilidad.
     """
     roll_std = pl.col(col_vol).rolling_std(window_size=window)
     roll_mean = pl.col(col_vol).rolling_mean(window_size=window)
@@ -84,8 +81,6 @@ def get_efficiency_ratio_ker(col_name: str, window: int) -> pl.Expr:
 def get_parkinson_volatility(col_high: str, col_low: str, window: int) -> pl.Expr:
     """
     Volatilidad de Parkinson (High-Low).
-    Mantenida por compatibilidad. 
-    Formula: sqrt( (1 / 4*ln(2)) * rolling_mean( ln(H/L)^2 ) )
     """
     log_hl_sq = (pl.col(col_high) / pl.col(col_low)).log().pow(2)
     
@@ -98,11 +93,7 @@ def get_parkinson_volatility(col_high: str, col_low: str, window: int) -> pl.Exp
 def get_garman_klass_volatility(col_high: str, col_low: str, col_close: str, col_open: str, window: int) -> pl.Expr:
     """
     Volatilidad de Garman-Klass.
-    Extensión de Parkinson que incluye información de apertura y cierre.
-    Más eficiente (menor varianza en la estimación) que Parkinson y Close-to-Close.
-    Formula: 0.5 * ln(H/L)^2 - (2*ln(2)-1) * ln(C/O)^2
     """
-    # Usamos log logs pre-calculados para eficiencia vectorizada
     log_hl_sq = (pl.col(col_high) / pl.col(col_low)).log().pow(2)
     log_co_sq = (pl.col(col_close) / pl.col(col_open)).log().pow(2)
     
@@ -118,8 +109,6 @@ def get_garman_klass_volatility(col_high: str, col_low: str, col_close: str, col
 def get_yang_zhang_volatility(col_open: str, col_high: str, col_low: str, col_close: str, window: int) -> pl.Expr:
     """
     Volatilidad de Yang-Zhang (Drift Independent + Gaps).
-    Combina volatilidad Overnight, Open-Close y Rogers-Satchell.
-    Formula: sqrt( Var_Overnight + k * Var_OpenClose + (1-k) * Var_RS )
     """
     # 1. Cálculo de k dinámico
     n = window
@@ -133,14 +122,12 @@ def get_yang_zhang_volatility(col_open: str, col_high: str, col_low: str, col_cl
     log_c_prev = log_c.shift(1)
     
     # 3. Componente Overnight: Varianza de ln(Open_t / Close_t-1)
-    # drift-independent implica usar varianza muestral
     term_overnight_var = (log_o - log_c_prev).rolling_var(window_size=window)
     
     # 4. Componente Open-Close: Varianza de ln(Close_t / Open_t)
     term_open_close_var = (log_c - log_o).rolling_var(window_size=window)
     
     # 5. Componente Rogers-Satchell (RS): Media rodante
-    # RS = ln(H/C)ln(H/O) + ln(L/C)ln(L/O)
     rs_raw = (
         ((log_h - log_c) * (log_h - log_o)) + 
         ((log_l - log_c) * (log_l - log_o))
@@ -162,7 +149,6 @@ def get_yang_zhang_volatility(col_open: str, col_high: str, col_low: str, col_cl
 def get_volatility_bounds(col_close: str, col_vol_yz: str, z_score: float, horizon: int) -> list[pl.Expr]:
     """
     Genera Conos de Volatilidad (Techo y Suelo) basados en la proyección de Yang-Zhang.
-    Formula: Price * (1 +/- Z * Vol * sqrt(T))
     """
     # Factor de proyección: Volatilidad * Z * sqrt(Tiempo)
     # Importante: np.sqrt es escalar aquí, lo cual es eficiente.
@@ -175,8 +161,7 @@ def get_volatility_bounds(col_close: str, col_vol_yz: str, z_score: float, horiz
 
 def get_amihud_liquidity(col_abs_ret: str, col_price: str, col_vol: str, window: int, scaling_factor: float = 1e6) -> pl.Expr:
     """
-    Iliquidez de Amihud con transformación LOGARÍTMICA.
-    Ayuda a comprimir los outliers extremos y mejora la estacionariedad.
+    liquidez de Amihud con transformación LOGARÍTMICA.
     """
     # Cálculo original
     daily_illiquidity = (
@@ -195,9 +180,6 @@ def get_amihud_liquidity(col_abs_ret: str, col_price: str, col_vol: str, window:
 def get_rsi(col_name: str, period: int) -> pl.Expr:
     """
     Relative Strength Index (RSI).
-    ACTUALIZADO: Usa 'com' en lugar de 'span' para replicar Wilder's Smoothing.
-    CORREGIDO: Usa 'min_samples' en lugar de 'min_periods' (Deprecation Fix).
-    alpha = 1 / period  <=> com = period - 1
     """
     delta = pl.col(col_name).diff()
     up = delta.clip(lower_bound=0)
@@ -219,7 +201,6 @@ def get_rsi(col_name: str, period: int) -> pl.Expr:
 def get_macd_expressions(col_name: str, fast: int, slow: int, signal: int) -> list[pl.Expr]:
     """
     Versión NORMALIZADA (PPO - Percentage Price Oscillator).
-    Calcula la diferencia como porcentaje de la EMA lenta.
     """
     ema_fast = pl.col(col_name).ewm_mean(span=fast, adjust=False)
     ema_slow = pl.col(col_name).ewm_mean(span=slow, adjust=False)

@@ -88,7 +88,7 @@ CONTEXT_PARAMS = {
     "LSTM_BATCH_SIZE": 64,
     "LSTM_LR": 1e-3,
     
-    "GMM_N_COMPONENTS": 5,        # Número de Regímenes de Mercado
+    "GMM_N_COMPONENTS": 3,     # Número de Regímenes de Mercado
     "GMM_COVARIANCE_TYPE": "full"
 }
 

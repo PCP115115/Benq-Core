@@ -90,3 +90,12 @@ htmlcov/
 .cursorindexingignore
 .DS_Store
 Thumbs.db
+
+# ===============================================
+# 📉 PLOTS & VISUALIZATIONS
+# ===============================================
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf

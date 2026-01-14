@@ -75,17 +75,56 @@ class LSTMHandler:
         
         X = np.lib.stride_tricks.as_strided(data_arr, shape=shape, strides=strides)
         
+        # Nota: Devolvemos el tensor completo aquí. El split se hace en fit/entrenamiento
+        # para mantener la firma de la función original intacta.
         return torch.FloatTensor(X).to(self.device), data_arr
 
-    def fit(self, train_loader):
+    def fit(self, train_loader, val_split=0.2):
+        """
+        Entrena el modelo.
+        MODIFICADO: Ahora acepta 'train_loader' que puede ser un DataLoader con todos los datos,
+        o una tupla de DataLoaders si ya se hizo el split fuera.
+        
+        Para mantener compatibilidad estricta con tu código anterior, si 'train_loader'
+        trae TODOS los datos, aquí dentro haremos el split cronológico manual para evitar
+        Look-Ahead Bias en la validación.
+        """
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.params["LSTM_LR"])
         criterion = nn.MSELoss()
-        self.model.train()
         
+        # Lógica para extraer los tensores del DataLoader original sin romper la firma
+        # Asumimos que train_loader es un iterable (DataLoader) que contiene TODO el dataset
+        all_data_tensors = []
+        for batch in train_loader:
+            all_data_tensors.append(batch[0])
+        
+        # Concatenamos para tener el tensor completo (preservando orden temporal)
+        full_tensor = torch.cat(all_data_tensors, dim=0)
+        
+        # --- IMPLEMENTACIÓN DE SPLIT CRONOLÓGICO (Train / Test) ---
+        n_samples = len(full_tensor)
+        n_train = int(n_samples * (1 - val_split))
+        
+        # División estricta por índice (sin shuffle)
+        train_tensor = full_tensor[:n_train]
+        val_tensor = full_tensor[n_train:]
+        
+        # Creamos nuevos DataLoaders internos
+        batch_size = train_loader.batch_size if hasattr(train_loader, 'batch_size') else 32
+        
+        internal_train_loader = DataLoader(TensorDataset(train_tensor), batch_size=batch_size, shuffle=False) # Shuffle False es vital en series temporales
+        internal_val_loader = DataLoader(TensorDataset(val_tensor), batch_size=batch_size, shuffle=False)
+
         print(f"🧠 Entrenando LSTM en {self.device}...")
+        print(f"📉 Split: Train ({len(train_tensor)}) | Test ({len(val_tensor)}) - Look-ahead bias prevention active.")
+
+        best_val_loss = float('inf')
+        
         for epoch in range(self.params["LSTM_EPOCHS"]):
-            total_loss = 0
-            for batch in train_loader:
+            # --- TRAIN LOOP ---
+            self.model.train()
+            train_loss = 0
+            for batch in internal_train_loader:
                 x_batch = batch[0] 
                 
                 optimizer.zero_grad()
@@ -94,11 +133,30 @@ class LSTMHandler:
                 
                 loss.backward()
                 optimizer.step()
-                total_loss += loss.item()
+                train_loss += loss.item()
             
-            # Reduce log verbosity for tests
+            avg_train_loss = train_loss / len(internal_train_loader)
+
+            # --- VALIDATION LOOP (TEST) ---
+            self.model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for batch in internal_val_loader:
+                    x_val = batch[0]
+                    reconstructed_val, _ = self.model(x_val)
+                    v_loss = criterion(reconstructed_val, x_val)
+                    val_loss += v_loss.item()
+            
+            avg_val_loss = val_loss / len(internal_val_loader) if len(internal_val_loader) > 0 else 0
+
+            # Logging simple (cada 10 épocas)
             if (epoch+1) % 10 == 0:
-                pass 
+                print(f"Epoch {epoch+1}/{self.params['LSTM_EPOCHS']} | Train Loss: {avg_train_loss:.6f} | Test Loss: {avg_val_loss:.6f}")
+                
+                # Opcional: Guardar mejor modelo basado en Test Loss
+                if avg_val_loss < best_val_loss:
+                    best_val_loss = avg_val_loss
+                    # Podrías guardar un checkpoint aquí si quisieras
 
     def encode(self, tensor_data):
         self.model.eval()
