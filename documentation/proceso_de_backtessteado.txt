@@ -1,0 +1,9 @@
+Pasos para acabar de desarrollar la V1.0.0:
+    1. Pulir la configuración de hiperparámetros. (aproximadamente hecho)
+    2. Desarrollar backtest reales completos normales. (aproximadamente hecho)
+    3. Backtests por partes, para discernir entre lo que genera ruido y lo que genera alfa
+    4. Backtest en situaciones de mercado generadas artificialmente.
+
+Una vez backtesteado el sistema, y optimizados los modelos, se procederá a:
+    1. Elaborar un mediador con un broker cualquiera, o generalizado
+    2. Un dashboard funcional en streamlit o similarS.
