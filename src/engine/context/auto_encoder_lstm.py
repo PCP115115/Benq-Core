@@ -82,12 +82,10 @@ class LSTMHandler:
     def fit(self, train_loader, val_split=0.2):
         """
         Entrena el modelo.
-        MODIFICADO: Ahora acepta 'train_loader' que puede ser un DataLoader con todos los datos,
-        o una tupla de DataLoaders si ya se hizo el split fuera.
+        MODIFICADO: Aplica PURGED SPLIT para evitar Look-Ahead Bias estricto.
         
-        Para mantener compatibilidad estricta con tu código anterior, si 'train_loader'
-        trae TODOS los datos, aquí dentro haremos el split cronológico manual para evitar
-        Look-Ahead Bias en la validación.
+        Acepta 'train_loader' que puede ser un DataLoader con todos los datos.
+        Dentro se realiza la separación cronológica con 'embargo' (purge) de datos.
         """
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.params["LSTM_LR"])
         criterion = nn.MSELoss()
@@ -101,13 +99,22 @@ class LSTMHandler:
         # Concatenamos para tener el tensor completo (preservando orden temporal)
         full_tensor = torch.cat(all_data_tensors, dim=0)
         
-        # --- IMPLEMENTACIÓN DE SPLIT CRONOLÓGICO (Train / Test) ---
-        n_samples = len(full_tensor)
-        n_train = int(n_samples * (1 - val_split))
+        # --- IMPLEMENTACIÓN DE PURGED SPLIT CRONOLÓGICO ---
+        # 1. Definir tamaño del Gap (Purga) igual al tamaño de la ventana.
+        # Esto asegura que ninguna ventana del Train termine después de que empiece la primera del Val.
+        window_size = self.params.get("LSTM_WINDOW_SIZE", 20)
+        purge_gap = window_size
         
-        # División estricta por índice (sin shuffle)
-        train_tensor = full_tensor[:n_train]
-        val_tensor = full_tensor[n_train:]
+        n_samples = len(full_tensor)
+        n_val_start = int(n_samples * (1 - val_split)) # Índice donde empieza Validación
+        n_train_end = n_val_start - purge_gap          # Índice donde termina Entrenamiento (con gap)
+        
+        if n_train_end <= 0:
+            raise ValueError(f"Dataset insuficiente para Purged Split. Samples: {n_samples}, Gap requerido: {purge_gap}")
+
+        # 2. División estricta con Gap
+        train_tensor = full_tensor[:n_train_end]
+        val_tensor = full_tensor[n_val_start:]
         
         # Creamos nuevos DataLoaders internos
         batch_size = train_loader.batch_size if hasattr(train_loader, 'batch_size') else 32
@@ -116,7 +123,8 @@ class LSTMHandler:
         internal_val_loader = DataLoader(TensorDataset(val_tensor), batch_size=batch_size, shuffle=False)
 
         print(f"🧠 Entrenando LSTM en {self.device}...")
-        print(f"📉 Split: Train ({len(train_tensor)}) | Test ({len(val_tensor)}) - Look-ahead bias prevention active.")
+        print(f"🛡️ PURGED SPLIT ACTIVO: Gap de {purge_gap} ventanas eliminado entre Train y Val.")
+        print(f"📉 Train Size: {len(train_tensor)} | Val Size: {len(val_tensor)} | Purged: {purge_gap}")
 
         best_val_loss = float('inf')
         

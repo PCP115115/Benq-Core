@@ -277,3 +277,11 @@ def get_feature_matrix(
         logger.error(f"❌ Error leyendo datos: {e}")
         return pl.DataFrame()
 
+if __name__ == "__main__":
+    try:
+        from src.strategy.config_strategy import TICKERS_ESTRATEGIA
+        df = get_feature_matrix(tickers=TICKERS_ESTRATEGIA, layer="robust", features="all")
+        print(df.head())
+    except Exception as e:
+        logger.error(f"❌ Error en ejecución directa: {e}")
+

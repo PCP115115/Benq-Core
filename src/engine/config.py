@@ -193,7 +193,7 @@ META_MODEL_PARAMS = {
         "objective": "binary:logistic", # Salida de probabilidad 0-1 (Se asume un modelo por barrera)
         "eval_metric": "auc",           # Misma métrica que el LightGBM
         "booster": "gbtree",
-        "n_jobs": 1,                    # Paralelización externa (como indicaste)
+        "n_jobs": 7,                    # Paralelización externa (como indicaste)
         "random_state": 42,
         
         # --- Control de Sobreajuste (El núcleo de la robustez) ---

@@ -200,3 +200,18 @@ def run_mini_models_pipeline(tickers: list, n_jobs: int = -1):
     print(f"🏁 PIPELINE FINALIZADO en {elapsed:.2f} segundos.")
     print("="*60)
 
+
+if __name__ == "__main__":
+    try:
+        # Intentamos importar la lista de tickers de la ESTRATEGIA
+        # Esto asegura que procesamos los activos correctos (los 21 nuevos)
+        from src.strategy.config_strategy import TICKERS_ESTRATEGIA
+        print("📋 Usando lista de tickers de ESTRATEGIA (config_strategy.py)")
+        target_tickers = TICKERS_ESTRATEGIA
+    except ImportError:
+        # Fallback si no se encuentra (para pruebas aisladas)
+        print("⚠️ No se encontró config_strategy. Usando lista de prueba simple.")
+        target_tickers = ["AAPL", "BTC-USD"]
+
+    # Ejecutar el pipeline
+    run_mini_models_pipeline(target_tickers, n_jobs=15)
