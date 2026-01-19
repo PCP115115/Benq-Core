@@ -159,20 +159,31 @@ def get_volatility_bounds(col_close: str, col_vol_yz: str, z_score: float, horiz
     
     return [ceil, floor]
 
-def get_amihud_liquidity(col_abs_ret: str, col_price: str, col_vol: str, window: int, scaling_factor: float = 1e6) -> pl.Expr:
+def get_amihud_liquidity(col_abs_ret: str, col_price: str, col_vol: str, window: int, scaling_factor: float = 1e9) -> pl.Expr:
     """
-    liquidez de Amihud con transformación LOGARÍTMICA.
+    Liquidez de Amihud ROBUSTA:
+    1. Protegida contra división por cero (Infinitos).
+    2. Escalada por factor (1e9 recomendado).
+    3. Transformación Logarítmica (log1p).
     """
-    # Cálculo original
-    daily_illiquidity = (
-        pl.col(col_abs_ret) / (pl.col(col_price) * pl.col(col_vol))
+    # 1. Cálculo base
+    term = pl.col(col_abs_ret) / (pl.col(col_price) * pl.col(col_vol))
+
+    # 2. SANITIZACIÓN: Convertimos Infinitos y NaNs a 0 antes de cualquier media
+    # Usamos expresiones nativas de Polars para velocidad
+    term_clean = (
+        pl.when(term.is_infinite() | term.is_nan() | term.is_null())
+        .then(0.0)
+        .otherwise(term)
     )
+
+    # 3. Promedio rodante
+    rolling_amihud = term_clean.rolling_mean(window_size=window, min_periods=1)
     
-    # Promedio rodante
-    rolling_amihud = daily_illiquidity.rolling_mean(window_size=window) * scaling_factor
-    
+    # 4. Escalado y Logaritmo
+    # Rellenamos nulos iniciales del rolling con 0
     return (
-        rolling_amihud
+        (rolling_amihud.fill_null(0.0) * scaling_factor)
         .log1p() 
         .alias(f"amihud_{window}d")
     )

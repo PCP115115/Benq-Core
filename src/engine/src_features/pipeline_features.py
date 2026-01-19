@@ -5,12 +5,11 @@ import logging
 import time
 
 # --- CONFIGURACIÓN DE RUTAS E IMPORTACIONES ---
-# Calculamos la raíz del proyecto para importaciones absolutas
-current_dir = os.path.dirname(os.path.abspath(__file__))  # src/engine/src_features
-engine_dir = os.path.dirname(os.path.dirname(current_dir)) # src/engine
-src_dir = os.path.dirname(engine_dir)                     # src
-project_root = os.path.dirname(src_dir)                   # Raíz (Benq-Core)
-
+# --- CÓDIGO CORREGIDO ---
+current_dir = os.path.dirname(os.path.abspath(__file__)) # .../src/engine/src_features
+engine_dir = os.path.dirname(current_dir)                # .../src/engine (Solo un dirname)
+src_dir = os.path.dirname(engine_dir)                    # .../src
+project_root = os.path.dirname(src_dir)                  # .../Benq-Core (Raíz correcta)
 # Añadimos la raíz al path si no está
 if project_root not in sys.path:
     sys.path.append(project_root)

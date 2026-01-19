@@ -6,7 +6,7 @@ Configuración centralizada para el Bloque de Estrategia.
 
 # --- LISTA DE ACTIVOS ---
 TICKERS_ESTRATEGIA = [
-    "AAPL", "TSLA", "BAC", "JPM", "AMZ",
+    "AAPL", "TSLA", "BAC", "JPM", "AMZN", "X", "CAT", "SAN"
 ]
 
 # --- CONFIGURACIÓN DEL META-MODELO ---
@@ -107,7 +107,7 @@ OUTPUT_CONFIG = {
 # --- CONFIGURACIÓN DE BACKTESTING ---
 BACKTEST_CONFIG = {
     # Periodo: 2023-2025 (2 años sólidos es suficiente para validar)
-    "START_DATE": "2025-01-01",
+    "START_DATE": "2020-01-01",
     "END_DATE": "2025-12-31",
     "INITIAL_CAPITAL": 100_000.0,
     

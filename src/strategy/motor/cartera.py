@@ -4,7 +4,9 @@ import logging
 import numpy as np
 import polars as pl
 from scipy.optimize import minimize
-from datetime import datetime, date  # <--- IMPORTANTE
+from sklearn.covariance import LedoitWolf
+from datetime import datetime, date, timedelta
+from functools import reduce
 
 # --- SETUP DE RUTAS ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -15,79 +17,170 @@ project_root = os.path.dirname(src_dir)         # Benq-Core
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# --- IMPORTS DIRECTOS ---
+# --- IMPORTS ---
 import src.strategy.config_strategy as strat_config
 from src.src_DD.loader import MarketLoader
-from src.strategy.motor.black_litterman import BlackLittermanModel
+
+# Motor de Retornos (Script anterior)
+try:
+    from src.strategy.motor.returns import get_strategy_returns
+except ImportError as e:
+    print(f"❌ Error crítico: No se encuentra el script de retornos (src/strategy/motor/returns.py). {e}")
+    sys.exit(1)
 
 # --- LOGGING ---
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - [PORTFOLIO] - %(levelname)s - %(message)s'
+    format='%(asctime)s - [PORTFOLIO_OPT] - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("PortfolioOpt")
+logger = logging.getLogger("PortfolioOptimizer")
 
 class PortfolioOptimizer:
     def __init__(self):
-        """Motor de Optimización Media-Varianza (Markowitz)."""
-        self.params = strat_config.PORTFOLIO_CONFIG
-        self.bl_config = strat_config.BLACK_LITTERMAN_CONFIG
-        self.bl_model = BlackLittermanModel()
+        """
+        Motor de Optimización Media-Varianza con Shrinkage Ledoit-Wolf.
+        """
+        self.tickers = strat_config.TICKERS_ESTRATEGIA
+        self.pf_config = strat_config.PORTFOLIO_CONFIG
+        self.bl_config = strat_config.BLACK_LITTERMAN_CONFIG 
+        
+        # Loader en modo "lazy" (no actualiza, solo lee)
         self.loader = MarketLoader(actualizar_datos=False)
 
     def _parse_date(self, date_input):
-        """Convierte cualquier entrada de fecha a datetime.date seguro."""
-        if date_input is None:
-            return None
+        """Normaliza la fecha a datetime.date."""
+        if date_input is None: return date.today()
         if isinstance(date_input, str):
-            # Intenta formato estándar YYYY-MM-DD
-            try:
-                return datetime.strptime(date_input, "%Y-%m-%d").date()
-            except ValueError:
-                # Si falla, intenta con timestamp completo
-                try:
-                    return datetime.strptime(date_input, "%Y-%m-%d %H:%M:%S").date()
-                except:
-                    return None
-        if isinstance(date_input, datetime):
-            return date_input.date()
-        if isinstance(date_input, date):
-            return date_input
-        return None
+            try: return datetime.strptime(date_input, "%Y-%m-%d").date()
+            except: return datetime.strptime(date_input.split(" ")[0], "%Y-%m-%d").date()
+        if isinstance(date_input, datetime): return date_input.date()
+        return date_input
+
+    def _get_historical_returns(self, end_date_dt, lookback_days=365):
+        """
+        Obtiene los retornos logarítmicos históricos para la matriz de covarianza.
+        """
+        start_date = end_date_dt - timedelta(days=lookback_days)
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date_dt.strftime("%Y-%m-%d")
+        
+        data_frames = []
+        
+        # [Image of Portfolio Optimization Data Alignment]
+        
+        for ticker in self.tickers:
+            ticker_clean = ticker.upper()
+            
+            # --- CONSULTA SQL ROBUSTA ---
+            # 1. Filtramos solo por ticker primero para ver si existe
+            # 2. Usamos CAST(Date AS DATE) para asegurar compatibilidad String vs Timestamp
+            sql_query = f"""
+                SELECT Date, Close 
+                FROM market 
+                WHERE ticker = '{ticker_clean}' 
+                AND CAST(Date AS DATE) >= CAST('{start_str}' AS DATE)
+                AND CAST(Date AS DATE) <= CAST('{end_str}' AS DATE)
+                ORDER BY Date
+            """
+            
+            df = self.loader.query(sql_query)
+            
+            if df is not None and not df.is_empty():
+                # Polars: Asegurar tipos
+                df_clean = df.select([
+                    pl.col("Date").cast(pl.Date),
+                    pl.col("Close").cast(pl.Float64).alias(ticker)
+                ])
+                
+                # Validar longitud mínima
+                if df_clean.height > 10:
+                    data_frames.append(df_clean)
+                else:
+                    logger.warning(f"⚠️ {ticker}: Datos insuficientes ({df_clean.height} filas) en rango {start_str} - {end_str}")
+            else:
+                # Si falla, puede que el ticker no tenga datos en ese rango
+                # logger.warning(f"⚠️ {ticker}: Query SQL retornó 0 filas.")
+                pass
+        
+        if not data_frames:
+            logger.error(f"❌ No se recuperaron datos históricos para ningún activo entre {start_str} y {end_str}.")
+            return None
+
+        try:
+            # Join Inner para asegurar integridad de datos (intersección de fechas)
+            df_merged = reduce(lambda left, right: left.join(right, on="Date", how="inner"), data_frames)
+        except Exception as e:
+            logger.error(f"Error uniendo históricos: {e}")
+            return None
+
+        # Ordenar y calcular retornos logarítmicos
+        df_merged = df_merged.sort("Date")
+        
+        # Necesitamos al menos 30 días de historia conjunta
+        if df_merged.height < 30:
+             logger.error(f"❌ Historia conjunta insuficiente ({df_merged.height} filas).")
+             return None
+
+        cols = [c for c in df_merged.columns if c != "Date"]
+        
+        df_returns = df_merged.select(
+            [pl.col(c).log().diff().alias(c) for c in cols]
+        ).drop_nulls()
+        
+        return df_returns
+
+    def _estimate_covariance_shrinkage(self, df_returns):
+        """Calcula covarianza con Shrinkage."""
+        X = df_returns.to_numpy()
+        horizon_days = self.bl_config.get("OPTIMIZATION_HORIZON", 5)
+
+        try:
+            lw = LedoitWolf()
+            shrunk_cov_daily = lw.fit(X).covariance_
+            sigma_period = shrunk_cov_daily * horizon_days
+            return sigma_period
+        except Exception as e:
+            logger.warning(f"⚠️ Fallo en Shrinkage ({e}). Usando covarianza estándar.")
+            return np.cov(X, rowvar=False) * horizon_days
 
     def _get_optimization_inputs(self, analysis_date=None):
-        """Obtiene Mu y Sigma filtrando correctamente por fecha."""
-        logger.info(f"📥 Recuperando inputs de Black-Litterman... (Fecha: {analysis_date if analysis_date else 'HOY'})")
-        
-        # 1. Obtener Retornos Posteriores (Mu) desde BL
-        df_bl_results = self.bl_model.run_optimization(analysis_date)
-        
-        if df_bl_results.is_empty():
-            raise ValueError("❌ Black-Litterman no generó retornos.")
+        """Orquesta E[R] y Sigma."""
+        target_date = self._parse_date(analysis_date)
+        date_str = target_date.strftime("%Y-%m-%d")
 
-        df_bl_results = df_bl_results.sort("Ticker")
-        tickers = df_bl_results["Ticker"].to_list()
-        mu = df_bl_results["BL_Post_%"].to_numpy() / 100.0
+        # A. E[R] (Predicciones)
+        df_preds = get_strategy_returns(analysis_date=date_str)
+        if df_preds is None or df_preds.is_empty():
+            logger.warning(f"⚠️ Sin predicciones para {date_str}.")
+            return None, None, None
+
+        df_preds = df_preds.sort("Ticker")
+        pred_tickers = df_preds["Ticker"].to_list()
+        mu = df_preds["Exp_Ret_%"].to_numpy() / 100.0
+
+        # B. Sigma (Histórico)
+        df_hist = self._get_historical_returns(target_date)
         
-        # 2. Obtener Matriz de Covarianzas (Sigma)
-        df_returns, _ = self.bl_model._get_historical_returns()
+        if df_hist is None:
+            return None, None, None
+
+        # C. Alineación
+        hist_tickers = df_hist.columns
+        common_tickers = sorted(list(set(pred_tickers) & set(hist_tickers)))
         
-        # --- CORRECCIÓN ROBUSTA DE FECHAS ---
-        if analysis_date:
-            target_date = self._parse_date(analysis_date)
-            if target_date:
-                # Aseguramos que la columna sea Date y filtramos comparando objetos Date
-                df_returns = df_returns.filter(
-                    pl.col("Date").cast(pl.Date) <= target_date
-                )
-            
-        # Seleccionamos solo las columnas relevantes
-        df_returns = df_returns.select(tickers)
-        
-        # Calculamos Sigma
-        sigma = self.bl_model._estimate_covariance_scaled(df_returns)
-        
-        return tickers, mu, sigma
+        if not common_tickers:
+            logger.error("❌ No hay coincidencia entre predicciones y datos históricos.")
+            return None, None, None
+
+        # Filtrar Mu
+        idx_mu = [pred_tickers.index(t) for t in common_tickers]
+        mu_aligned = mu[idx_mu]
+
+        # Filtrar Sigma
+        df_hist_aligned = df_hist.select(common_tickers)
+        sigma_aligned = self._estimate_covariance_shrinkage(df_hist_aligned)
+
+        return common_tickers, mu_aligned, sigma_aligned
 
     def _calculate_metrics(self, weights, mu, sigma):
         p_ret = np.sum(mu * weights)
@@ -95,10 +188,10 @@ class PortfolioOptimizer:
         return p_ret, p_vol
 
     # --- FUNCIONES OBJETIVO ---
-    def _obj_neg_sharpe(self, weights, mu, sigma, rf):
+    def _obj_neg_sharpe(self, weights, mu, sigma, rf_period):
         ret, vol = self._calculate_metrics(weights, mu, sigma)
-        if vol == 0: return 1e6
-        return -((ret - rf) / vol)
+        if vol < 1e-6: return 1e6
+        return -((ret - rf_period) / vol)
 
     def _obj_neg_return(self, weights, mu, sigma):
         ret, _ = self._calculate_metrics(weights, mu, sigma)
@@ -108,26 +201,27 @@ class PortfolioOptimizer:
         _, vol = self._calculate_metrics(weights, mu, sigma)
         return vol
 
-    def optimize_portfolio(self, analysis_date=None) -> pl.DataFrame:
-        """Ejecuta la optimización convexa."""
-        # Propagamos la fecha
+    def optimize(self, analysis_date=None) -> pl.DataFrame:
         tickers, mu, sigma = self._get_optimization_inputs(analysis_date)
-        n_assets = len(tickers)
-        
-        objective = self.params["OBJECTIVE"]
-        logger.info(f"⚖️ Iniciando optimización. Objetivo: {objective} | Activos: {n_assets}")
+        if tickers is None: return pl.DataFrame()
 
-        horizon_days = self.bl_config["OPTIMIZATION_HORIZON"]
-        rf_annual = self.params["RISK_FREE_RATE_ANNUAL"]
-        rf_period = rf_annual * (horizon_days / 252.0)
+        n_assets = len(tickers)
+        objective = self.pf_config["OBJECTIVE"]
+        allow_shorts = self.pf_config["ALLOW_SHORTS"]
+        min_w_cfg = self.pf_config["MIN_WEIGHT_PER_ASSET"]
+        max_w = self.pf_config["MAX_WEIGHT_PER_ASSET"]
+        
+        rf_annual = self.pf_config["RISK_FREE_RATE_ANNUAL"]
+        horizon_days = self.bl_config.get("OPTIMIZATION_HORIZON", 5)
+        rf_period = rf_annual * (horizon_days / 365.0)
 
         constraints = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]
-
-        if self.params["ALLOW_SHORTS"]:
-            bounds = tuple((self.params["MIN_WEIGHT_PER_ASSET"], self.params["MAX_WEIGHT_PER_ASSET"]) for _ in range(n_assets))
+        
+        if allow_shorts:
+            bounds = tuple((min_w_cfg, max_w) for _ in range(n_assets))
         else:
-            min_w = max(0.0, self.params["MIN_WEIGHT_PER_ASSET"])
-            bounds = tuple((min_w, self.params["MAX_WEIGHT_PER_ASSET"]) for _ in range(n_assets))
+            lower_bound = max(0.0, min_w_cfg)
+            bounds = tuple((lower_bound, max_w) for _ in range(n_assets))
 
         init_guess = np.array([1.0 / n_assets] * n_assets)
 
@@ -141,39 +235,37 @@ class PortfolioOptimizer:
             fun = self._obj_min_volatility
             args = (mu, sigma)
         else:
-            raise ValueError(f"Objetivo desconocido: {objective}")
+            return pl.DataFrame()
 
-        opt_result = minimize(
-            fun, init_guess, args=args, method='SLSQP', bounds=bounds, constraints=constraints, tol=1e-8
-        )
+        try:
+            opt_result = minimize(
+                fun, init_guess, args=args, method='SLSQP', bounds=bounds, constraints=constraints, tol=1e-8
+            )
+        except Exception as e:
+            logger.error(f"❌ Error en SLSQP: {e}")
+            return pl.DataFrame()
 
-        optimal_weights = opt_result.x
-        optimal_weights[np.abs(optimal_weights) < 0.0001] = 0.0
+        final_weights = opt_result.x
+        final_weights[np.abs(final_weights) < 0.0001] = 0.0
         
-        final_ret, final_vol = self._calculate_metrics(optimal_weights, mu, sigma)
-        final_sharpe = (final_ret - rf_period) / final_vol if final_vol > 0 else 0
+        if np.sum(final_weights) != 0:
+            final_weights = final_weights / np.sum(final_weights)
 
         results = []
         for i, t in enumerate(tickers):
+            w = final_weights[i]
             results.append({
                 "Ticker": t,
-                "Weight_%": round(optimal_weights[i] * 100, 2),
-                "Exp_Ret_Period_%": round(mu[i] * 100, 3)
+                "Weight": round(w, 4),
+                "Weight_%": round(w * 100, 2),
+                "Exp_Ret_5d_%": round(mu[i] * 100, 2)
             })
-            
-        df_weights = pl.DataFrame(results).sort("Weight_%", descending=True)
-        
-        print("\n" + "="*60)
-        print(f"💎 CARTERA ÓPTIMA ({objective})")
-        print(f"   Horizonte: {horizon_days} días | Sharpe: {final_sharpe:.4f}")
-        print("="*60)
-        print(df_weights)
-        
-        return df_weights
 
-def run_portfolio_optimization():
+        return pl.DataFrame(results).sort("Weight", descending=True)
+
+def run_portfolio_optimization(analysis_date=None):
     optimizer = PortfolioOptimizer()
-    return optimizer.optimize_portfolio()
+    return optimizer.optimize(analysis_date=analysis_date)
 
 if __name__ == "__main__":
-    run_portfolio_optimization()
+    print(run_portfolio_optimization())

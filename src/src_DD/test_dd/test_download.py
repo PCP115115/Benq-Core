@@ -1,21 +1,50 @@
-import unittest
-import os
 import sys
-import shutil
+import os
+import logging
+import numpy as np
 import polars as pl
+from sklearn.covariance import LedoitWolf
+from datetime import datetime, date
 import pandas as pd
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+import unittest
+from unittest.mock import patch
+import shutil
+from datetime import timedelta
 
 # --- SETUP DE RUTAS ---
-current_dir = os.path.dirname(os.path.abspath(__file__))
-# Asumiendo estructura: /tests/test_download.py -> /src/download.py
-src_path = os.path.join(os.path.dirname(current_dir), 'src')
-sys.path.append(src_path)
+# Ruta del script: .../src/src_DD/test_dd/test_download.py
+file_path = os.path.abspath(__file__)
+test_dd_dir = os.path.dirname(file_path)      # .../src/src_DD/test_dd
+src_dd_dir = os.path.dirname(test_dd_dir)     # .../src/src_DD
+src_dir = os.path.dirname(src_dd_dir)         # .../src
+project_root = os.path.dirname(src_dir)       # .../ (Raíz del proyecto)
 
-# Importamos el módulo completo para poder mockear sus componentes
-import download 
-from download import procesar_activo, FECHA_INICIO_DEFECTO
+# Añadimos la raíz al path con prioridad (insert 0)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# --- IMPORTS ---
+try:
+    # 1. Para la CLASE MarketLoader (si la necesitas en este test)
+    from src.src_DD.loader import MarketLoader
+
+    # 2. Para la FUNCIÓN procesar_activo (CRUCIAL: Tus tests usan esta función)
+    # Asumo que esta función vive en download.py
+    from src.src_DD.download import procesar_activo
+    
+    # 3. Configuración de estrategia
+    import src.strategy.config_strategy as strat_config
+
+except ImportError as e:
+    print(f"❌ Error crítico importando módulos.")
+    print(f"   Ruta del proyecto detectada: {project_root}")
+    print(f"   Error detalle: {e}")
+    sys.exit(1)
+
+# --- LOGGING ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - [BL] - %(message)s')
+logger = logging.getLogger("BL_Optimizer")
+
 
 class TestDescargaIncremental(unittest.TestCase):
 
@@ -24,15 +53,19 @@ class TestDescargaIncremental(unittest.TestCase):
         self.ticker_prueba = "TEST_TICKER"
         self.sector_prueba = "Test_Sector"
         
-        # Directorio temporal aislado
-        self.root_temp = os.path.join(current_dir, "temp_test_env")
+        # --- CORRECCIÓN AQUÍ ---
+        # Usamos 'test_dd_dir' porque es la variable que contiene la ruta de este script
+        # (definida al inicio del archivo).
+        self.root_temp = os.path.join(test_dd_dir, "temp_test_env")
+        # -----------------------
+
         self.ruta_raw_temp = os.path.join(self.root_temp, "raw")
         self.ruta_archivo_final = os.path.join(self.ruta_raw_temp, self.sector_prueba, f"{self.ticker_prueba}.parquet")
         
         os.makedirs(self.ruta_raw_temp, exist_ok=True)
 
         # Mock del path global: Forzamos a que el script use nuestra carpeta temporal
-        self.patcher_path = patch('download.BASE_DATA_PATH', self.ruta_raw_temp)
+        self.patcher_path = patch('src.src_DD.download.BASE_DATA_PATH', self.ruta_raw_temp)
         self.patcher_path.start()
 
     def tearDown(self):
@@ -79,7 +112,7 @@ class TestDescargaIncremental(unittest.TestCase):
         print("   ✅ Descarga real y guardado exitoso.")
 
     # --- TEST 2: LÓGICA INCREMENTAL (Mocked) ---
-    @patch('download.yf.download') 
+    @patch('src.src_DD.download.yf.download') 
     def test_02_logica_incremental_append(self, mock_yf):
         """
         Simula que ya tenemos datos hasta hace 5 días.
@@ -131,7 +164,7 @@ class TestDescargaIncremental(unittest.TestCase):
         print(f"   ✅ Correcto: Se pidieron datos desde {expected_start} y se fusionaron ({filas_iniciales} -> {df_final.height} filas).")
 
     # --- TEST 3: EFICIENCIA (Datos Frescos) ---
-    @patch('download.yf.download')
+    @patch('src.src_DD.download.yf.download')
     def test_03_datos_frescos_no_descarga(self, mock_yf):
         """
         Simula que el archivo ya está actualizado hasta ayer.

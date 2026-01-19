@@ -7,7 +7,7 @@
 ticker_analizado = "AAPL"
 tiempo_analisis = 5
 start_date = "2010-01-01"
-end_date = "2023-12-31"
+end_date = "2025-12-31"
 layer = "neutral"  # Capas: "all", "robust", "neutral"
 
 #============================================
@@ -32,7 +32,7 @@ FEATURES_PARAMS = {
 
     # Liquidez
     "AMIHUD_WINDOW": 20,          # Ventana de media móvil para iliquidez
-    "AMIHUD_SCALING": 1e6,        # [NUEVO] Sacado de la función. Permite ajustar según el activo.
+    "AMIHUD_SCALING": 1e9,        # [NUEVO] Sacado de la función. Permite ajustar según el activo.
     
     # Medias Móviles para Tendencia Relativa
     "SMA_FAST": 15,
@@ -72,8 +72,7 @@ CONTEXT_PARAMS = {
     # Seleccionamos: Volatilidad, Eficiencia, Liquidez y Correlación
     "INPUT_FEATURES": [
         "vol_yz_20d", 
-        "ker_10", 
-        "amihud_20d", 
+        "ker_10",  
         "corr_price_vol_20d"
     ],
     
