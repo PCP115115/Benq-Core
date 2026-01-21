@@ -37,7 +37,7 @@ At the moment: Phase 2
   - OLAP storage layer based on **DuckDB** and **Parquet**.
   - Culminates in the function: `MarketLoader()`.
 
-- [x ] **Phase 2: Modeling System Development** 
+- [x] **Phase 2: Modeling System Development** 
   - **Features**: Module dedicated to feature engineering, culminating in the function: `get_feature_matrix()`.
   - **Context**: Advanced module for Market Regime Detection.
   - **Mini-models**: Development of specialized models following a Mixture of Experts (MoE) architecture.
