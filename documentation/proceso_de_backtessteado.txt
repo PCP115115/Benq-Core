@@ -1,9 +1,57 @@
 Pasos para acabar de desarrollar la V1.0.0:
     1. Pulir la configuración de hiperparámetros. (aproximadamente hecho)
     2. Desarrollar backtest reales completos normales. (aproximadamente hecho)
-    3. Backtests por partes, para discernir entre lo que genera ruido y lo que genera alfa
+    3. Backtests por partes, para discernir entre lo que genera ruido y lo que genera alfa (mini modelos están hechos, estaría muy
+    bien hacerle alguna prueba al modelo context)
     4. Backtest en situaciones de mercado generadas artificialmente.
 
 Una vez backtesteado el sistema, y optimizados los modelos, se procederá a:
     1. Elaborar un mediador con un broker cualquiera, o generalizado
     2. Un dashboard funcional en streamlit o similarS.
+
+
+
+Resultados de backtest 2025 mini-modelos:
+
+empresas: "AAPL", "BAC", "JPM", "AMZN", "X", "CAT", "SAN"
+============================================================
+📊 RESULTADOS FINAL DEL WALK-FORWARD (MINI-MODELS)
+============================================================
+🔹 ESTRATEGIA TREND:
+   💰 Retorno Total: 18.55% ($118,552)
+   ⚡ Sharpe Ratio:  0.89
+   📉 Max Drawdown:  -20.56%
+------------------------------
+🔸 ESTRATEGIA REVERSION:
+   💰 Retorno Total: 6.27% ($106,273)
+   ⚡ Sharpe Ratio:  0.40
+   📉 Max Drawdown:  -22.01%
+------------------------------
+📦 BENCHMARK (EW Buy & Hold):
+   💰 Retorno Total: 32.36% ($132,364)
+   ⚡ Sharpe Ratio:  1.94
+   📉 Max Drawdown:  -18.02%
+============================================================
+
+Resultados backtest mini modelos para 2022 (año bajista):
+============================================================
+📊 RESULTADOS FINAL DEL WALK-FORWARD (MINI-MODELS)
+============================================================
+🔹 ESTRATEGIA TREND:
+   💰 Retorno Total: -13.38% ($86,622)
+   ⚡ Sharpe Ratio:  -0.46
+   📉 Max Drawdown:  -24.55%
+------------------------------
+🔸 ESTRATEGIA REVERSION:
+   💰 Retorno Total: -13.04% ($86,958)
+   ⚡ Sharpe Ratio:  -0.38
+   📉 Max Drawdown:  -31.70%
+------------------------------
+📦 BENCHMARK (EW Buy & Hold):
+   💰 Retorno Total: -19.38% ($80,620)
+   ⚡ Sharpe Ratio:  -0.09
+   📉 Max Drawdown:  -21.77%
+============================================================
+
+🖼️ Gráfico guardado en: c:\Users\pedro\Documents\GitHub\Benq-Core\src\strategy\backtesting\mini_models_comparison.png
+PS C:\Users\pedro\Documents\GitHub\Benq-Core> 

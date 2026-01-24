@@ -211,7 +211,7 @@ if __name__ == "__main__":
     except ImportError:
         # Fallback si no se encuentra (para pruebas aisladas)
         print("⚠️ No se encontró config_strategy. Usando lista de prueba simple.")
-        target_tickers = ["AAPL", "BTC-USD"]
+        target_tickers = ["AAPL", "MSFT", "GOOGL"]
 
     # Ejecutar el pipeline
     run_mini_models_pipeline(target_tickers, n_jobs=15)

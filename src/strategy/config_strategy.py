@@ -6,7 +6,7 @@ Configuración centralizada para el Bloque de Estrategia.
 
 # --- LISTA DE ACTIVOS ---
 TICKERS_ESTRATEGIA = [
-    "AAPL", "TSLA", "BAC", "JPM", "AMZN", "X", "CAT", "SAN"
+    "AAPL", "BAC", "JPM", "AMZN", "X", "CAT", "SAN"
 ]
 
 # --- CONFIGURACIÓN DEL META-MODELO ---
@@ -107,14 +107,14 @@ OUTPUT_CONFIG = {
 # --- CONFIGURACIÓN DE BACKTESTING ---
 BACKTEST_CONFIG = {
     # Periodo: 2023-2025 (2 años sólidos es suficiente para validar)
-    "START_DATE": "2020-01-01",
-    "END_DATE": "2025-12-31",
+    "START_DATE": "2022-01-01",
+    "END_DATE": "2022-12-31",
     "INITIAL_CAPITAL": 100_000.0,
     
     # Frecuencia de Rebalanceo OPTIMIZADA:
     # "MS": Month Start (Primer día del mes). 
     # Esto es mucho más rápido que Semanal ("W-FRI").
-    "REBALANCE_FREQ": "MS", 
+    "REBALANCE_FREQ": "W-MON", 
     
     "COMMISSION_PCT": 0.0010,
     "SLIPPAGE_PCT": 0.0005,

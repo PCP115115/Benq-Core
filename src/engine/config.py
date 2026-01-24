@@ -31,7 +31,7 @@ FEATURES_PARAMS = {
     "YZ_FORECAST_HORIZON": tiempo_analisis,     # Proyección a 5 días (semana bursátil)
 
     # Liquidez
-    "AMIHUD_WINDOW": 20,          # Ventana de media móvil para iliquidez
+    "AMIHUD_WINDOW": 20,          # Ventana de media móvil para liquidez de Amihud
     "AMIHUD_SCALING": 1e9,        # [NUEVO] Sacado de la función. Permite ajustar según el activo.
     
     # Medias Móviles para Tendencia Relativa
